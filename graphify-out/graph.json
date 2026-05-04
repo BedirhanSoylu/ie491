@@ -1,0 +1,492 @@
+{
+  "directed": false,
+  "multigraph": false,
+  "graph": {
+    "hyperedges": [
+      {
+        "id": "force_modeling_pipeline",
+        "label": "Force Modeling and Optimization Pipeline",
+        "nodes": [
+          "calculateForceError_Fixed",
+          "computeResiduals_Spline",
+          "run_Spline_Optimizer",
+          "hardstavaxtool15datalong"
+        ],
+        "relation": "participate_in",
+        "confidence": "INFERRED",
+        "confidence_score": 0.85,
+        "source_file": "run_Spline_Optimizer.m"
+      },
+      {
+        "id": "experimental_tooth_analysis",
+        "label": "Experimental Tooth-Level Force Analysis",
+        "nodes": [
+          "ForceDataAnalysisv11tool15",
+          "ForceDataAnalysisv13tool15",
+          "hardstavaxtool15datalong"
+        ],
+        "relation": "participate_in",
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "source_file": "ForceDataAnalysisv11tool15.m"
+      },
+      {
+        "id": "tool_wear_edge_detection",
+        "label": "Tool Wear Edge Detection and RANSAC Chain",
+        "nodes": [
+          "wornArea",
+          "calculate_edge_radii",
+          "analyze_single_side_silent",
+          "ransac_filter_interval"
+        ],
+        "relation": "form",
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "source_file": "wornArea.m"
+      }
+    ]
+  },
+  "nodes": [
+    {
+      "label": "calculateForceError_Fixed.m",
+      "file_type": "code",
+      "source_file": "calculateForceError_Fixed.m",
+      "source_location": "L1",
+      "id": "calculateforceerror_fixed_m",
+      "community": 5,
+      "norm_label": "calculateforceerror_fixed.m"
+    },
+    {
+      "label": "computeResiduals_Spline.m",
+      "file_type": "code",
+      "source_file": "computeResiduals_Spline.m",
+      "source_location": "L1",
+      "id": "computeresiduals_spline_m",
+      "community": 6,
+      "norm_label": "computeresiduals_spline.m"
+    },
+    {
+      "label": "ForceDataAnalysisv11tool15.m",
+      "file_type": "code",
+      "source_file": "ForceDataAnalysisv11tool15.m",
+      "source_location": "L1",
+      "id": "forcedataanalysisv11tool15_m",
+      "community": 7,
+      "norm_label": "forcedataanalysisv11tool15.m"
+    },
+    {
+      "label": "ForceDataAnalysisv13tool15.m",
+      "file_type": "code",
+      "source_file": "ForceDataAnalysisv13tool15.m",
+      "source_location": "L1",
+      "id": "forcedataanalysisv13tool15_m",
+      "community": 8,
+      "norm_label": "forcedataanalysisv13tool15.m"
+    },
+    {
+      "label": "run_Spline_Optimizer.m",
+      "file_type": "code",
+      "source_file": "run_Spline_Optimizer.m",
+      "source_location": "L1",
+      "id": "run_spline_optimizer_m",
+      "community": 9,
+      "norm_label": "run_spline_optimizer.m"
+    },
+    {
+      "label": "wornArea.m",
+      "file_type": "code",
+      "source_file": "wornArea.m",
+      "source_location": "L1",
+      "id": "wornarea_m",
+      "community": 10,
+      "norm_label": "wornarea.m"
+    },
+    {
+      "label": "calculateForceError_Fixed Function",
+      "file_type": "code",
+      "source_file": "calculateForceError_Fixed.m",
+      "source_location": "1:67",
+      "id": "calculateForceError_Fixed",
+      "community": 1,
+      "norm_label": "calculateforceerror_fixed function"
+    },
+    {
+      "label": "computeResiduals_Spline Function",
+      "file_type": "code",
+      "source_file": "computeResiduals_Spline.m",
+      "source_location": "1:65",
+      "id": "computeResiduals_Spline",
+      "community": 1,
+      "norm_label": "computeresiduals_spline function"
+    },
+    {
+      "label": "run_Spline_Optimizer Script",
+      "file_type": "code",
+      "source_file": "run_Spline_Optimizer.m",
+      "source_location": "1:95",
+      "id": "run_Spline_Optimizer",
+      "community": 4,
+      "norm_label": "run_spline_optimizer script"
+    },
+    {
+      "label": "ForceDataAnalysisv11tool15 Script",
+      "file_type": "code",
+      "source_file": "ForceDataAnalysisv11tool15.m",
+      "source_location": "1:143",
+      "id": "ForceDataAnalysisv11tool15",
+      "community": 2,
+      "norm_label": "forcedataanalysisv11tool15 script"
+    },
+    {
+      "label": "ForceDataAnalysisv13tool15 Script",
+      "file_type": "code",
+      "source_file": "ForceDataAnalysisv13tool15.m",
+      "source_location": "1:113",
+      "id": "ForceDataAnalysisv13tool15",
+      "community": 2,
+      "norm_label": "forcedataanalysisv13tool15 script"
+    },
+    {
+      "label": "wornArea Main Function",
+      "file_type": "code",
+      "source_file": "wornArea.m",
+      "source_location": "1:172",
+      "id": "wornArea",
+      "community": 3,
+      "norm_label": "wornarea main function"
+    },
+    {
+      "label": "calculate_edge_radii Function",
+      "file_type": "code",
+      "source_file": "wornArea.m",
+      "source_location": "178:271",
+      "id": "calculate_edge_radii",
+      "community": 3,
+      "norm_label": "calculate_edge_radii function"
+    },
+    {
+      "label": "analyze_single_side_silent Function",
+      "file_type": "code",
+      "source_file": "wornArea.m",
+      "source_location": "273:355",
+      "id": "analyze_single_side_silent",
+      "community": 0,
+      "norm_label": "analyze_single_side_silent function"
+    },
+    {
+      "label": "findRefinedAnchor Function",
+      "file_type": "code",
+      "source_file": "wornArea.m",
+      "source_location": "357:374",
+      "id": "findRefinedAnchor",
+      "community": 0,
+      "norm_label": "findrefinedanchor function"
+    },
+    {
+      "label": "ransac_filter_interval Function",
+      "file_type": "code",
+      "source_file": "wornArea.m",
+      "source_location": "376:427",
+      "id": "ransac_filter_interval",
+      "community": 0,
+      "norm_label": "ransac_filter_interval function"
+    },
+    {
+      "label": "run_ransac_fixed_center Function",
+      "file_type": "code",
+      "source_file": "wornArea.m",
+      "source_location": "429:451",
+      "id": "run_ransac_fixed_center",
+      "community": 0,
+      "norm_label": "run_ransac_fixed_center function"
+    },
+    {
+      "label": "circfit_radius_only Function",
+      "file_type": "code",
+      "source_file": "wornArea.m",
+      "source_location": "453:457",
+      "id": "circfit_radius_only",
+      "community": 0,
+      "norm_label": "circfit_radius_only function"
+    },
+    {
+      "label": "Hardstava Tool 15 Experimental Force Data",
+      "file_type": "document",
+      "source_file": "hardstavaxtool15datalong.txt",
+      "source_location": null,
+      "id": "hardstavaxtool15datalong",
+      "community": 2,
+      "norm_label": "hardstava tool 15 experimental force data"
+    },
+    {
+      "label": "Shape-Preserving Piecewise Cubic Interpolation",
+      "file_type": "rationale",
+      "source_file": "calculateForceError_Fixed.m",
+      "source_location": "37:40",
+      "id": "pchip_interpolation",
+      "community": 1,
+      "norm_label": "shape-preserving piecewise cubic interpolation"
+    },
+    {
+      "label": "Milling Force Simulation with Chip Thickness",
+      "file_type": "rationale",
+      "source_file": "calculateForceError_Fixed.m",
+      "source_location": "22:59",
+      "id": "milling_simulation_physics",
+      "community": 1,
+      "norm_label": "milling force simulation with chip thickness"
+    },
+    {
+      "label": "B-Spline Control Point Force Modeling",
+      "file_type": "rationale",
+      "source_file": "run_Spline_Optimizer.m",
+      "source_location": "1:10",
+      "id": "bspline_force_modeling",
+      "community": 4,
+      "norm_label": "b-spline control point force modeling"
+    },
+    {
+      "label": "Tooth-Level Zero-Crossing Sampling Analysis",
+      "file_type": "rationale",
+      "source_file": "ForceDataAnalysisv11tool15.m",
+      "source_location": "1:5",
+      "id": "tooth_level_force_analysis",
+      "community": 2,
+      "norm_label": "tooth-level zero-crossing sampling analysis"
+    },
+    {
+      "label": "Tool Wear Area Measurement and Visualization",
+      "file_type": "rationale",
+      "source_file": "wornArea.m",
+      "source_location": "1:10",
+      "id": "tool_wear_quantification",
+      "community": 3,
+      "norm_label": "tool wear area measurement and visualization"
+    }
+  ],
+  "links": [
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "calculateForceError_Fixed.m",
+      "source_location": "37:40",
+      "source": "calculateForceError_Fixed",
+      "target": "pchip_interpolation"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "calculateForceError_Fixed.m",
+      "source_location": "22:59",
+      "source": "calculateForceError_Fixed",
+      "target": "milling_simulation_physics"
+    },
+    {
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.9,
+      "source_file": "calculateForceError_Fixed.m",
+      "source_location": null,
+      "source": "calculateForceError_Fixed",
+      "target": "computeResiduals_Spline"
+    },
+    {
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "run_Spline_Optimizer.m",
+      "source_location": "55, 65",
+      "source": "run_Spline_Optimizer",
+      "target": "computeResiduals_Spline"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "computeResiduals_Spline.m",
+      "source_location": "38:42",
+      "source": "computeResiduals_Spline",
+      "target": "pchip_interpolation"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "computeResiduals_Spline.m",
+      "source_location": "21:58",
+      "source": "computeResiduals_Spline",
+      "target": "milling_simulation_physics"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "run_Spline_Optimizer.m",
+      "source_location": "1:10",
+      "source": "run_Spline_Optimizer",
+      "target": "bspline_force_modeling"
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "run_Spline_Optimizer.m",
+      "source_location": "15",
+      "source": "run_Spline_Optimizer",
+      "target": "hardstavaxtool15datalong"
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "ForceDataAnalysisv11tool15.m",
+      "source_location": "10",
+      "source": "ForceDataAnalysisv11tool15",
+      "target": "hardstavaxtool15datalong"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "ForceDataAnalysisv11tool15.m",
+      "source_location": "1:5",
+      "source": "ForceDataAnalysisv11tool15",
+      "target": "tooth_level_force_analysis"
+    },
+    {
+      "relation": "semantically_similar_to",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "ForceDataAnalysisv11tool15.m",
+      "source_location": null,
+      "source": "ForceDataAnalysisv11tool15",
+      "target": "ForceDataAnalysisv13tool15"
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "ForceDataAnalysisv13tool15.m",
+      "source_location": "8",
+      "source": "ForceDataAnalysisv13tool15",
+      "target": "hardstavaxtool15datalong"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "ForceDataAnalysisv13tool15.m",
+      "source_location": "1:3",
+      "source": "ForceDataAnalysisv13tool15",
+      "target": "tooth_level_force_analysis"
+    },
+    {
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "wornArea.m",
+      "source_location": "95",
+      "source": "wornArea",
+      "target": "calculate_edge_radii"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "wornArea.m",
+      "source_location": "1:10",
+      "source": "wornArea",
+      "target": "tool_wear_quantification"
+    },
+    {
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "wornArea.m",
+      "source_location": "246, 259",
+      "source": "calculate_edge_radii",
+      "target": "analyze_single_side_silent"
+    },
+    {
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "wornArea.m",
+      "source_location": "280",
+      "source": "analyze_single_side_silent",
+      "target": "findRefinedAnchor"
+    },
+    {
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "wornArea.m",
+      "source_location": "346",
+      "source": "analyze_single_side_silent",
+      "target": "ransac_filter_interval"
+    },
+    {
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "wornArea.m",
+      "source_location": "354",
+      "source": "analyze_single_side_silent",
+      "target": "circfit_radius_only"
+    },
+    {
+      "relation": "calls",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "wornArea.m",
+      "source_location": "410",
+      "source": "ransac_filter_interval",
+      "target": "run_ransac_fixed_center"
+    }
+  ],
+  "hyperedges": [
+    {
+      "id": "force_modeling_pipeline",
+      "label": "Force Modeling and Optimization Pipeline",
+      "nodes": [
+        "calculateForceError_Fixed",
+        "computeResiduals_Spline",
+        "run_Spline_Optimizer",
+        "hardstavaxtool15datalong"
+      ],
+      "relation": "participate_in",
+      "confidence": "INFERRED",
+      "confidence_score": 0.85,
+      "source_file": "run_Spline_Optimizer.m"
+    },
+    {
+      "id": "experimental_tooth_analysis",
+      "label": "Experimental Tooth-Level Force Analysis",
+      "nodes": [
+        "ForceDataAnalysisv11tool15",
+        "ForceDataAnalysisv13tool15",
+        "hardstavaxtool15datalong"
+      ],
+      "relation": "participate_in",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "ForceDataAnalysisv11tool15.m"
+    },
+    {
+      "id": "tool_wear_edge_detection",
+      "label": "Tool Wear Edge Detection and RANSAC Chain",
+      "nodes": [
+        "wornArea",
+        "calculate_edge_radii",
+        "analyze_single_side_silent",
+        "ransac_filter_interval"
+      ],
+      "relation": "form",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "wornArea.m"
+    }
+  ]
+}
