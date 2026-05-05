@@ -23,7 +23,7 @@ class ParticleFilter:
         self,
         n_particles: int = N_PARTICLES,
         critical_threshold: float = CRITICAL_THRESHOLD,
-        mu_drift: float = 0.018,
+        mu_drift: float = 0.006,
         sigma_drift: float = 0.008,
         sigma_obs: float = 0.07,
     ) -> None:

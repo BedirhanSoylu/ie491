@@ -141,7 +141,7 @@ def background_loop(
             shared_state["current_Fx"]      = Fx.tolist()
             shared_state["current_Fy"]      = Fy.tolist()
 
-        print(f"\n[Ch {channel:02d} / {ch_data['slot_name']}]", end="  ")
+        print(f"\n[Ch {channel:02d} / 45]", end="  ")
 
         # 1. Spline analysis → Ft/Fn + plateau_score
         try:
