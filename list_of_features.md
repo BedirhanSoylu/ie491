@@ -1,36 +1,36 @@
-# Features and Requirements Specification: Multi-Agent Tool Wear Monitoring System
+# Features and Requirements: Particle Filter-Based Multi-Agent System (PF-MAS)
 
 ## 1. Project Overview
-The objective is to build a Multi-Agent System (MAS) to monitor and predict the degradation of a micro-milling cutting tool used on hardened steel[cite: 1]. The system must optimize tool utilization by deciding whether to continue production, pause for an image-based inspection, or replace the tool based on high-frequency force data and intermittent image analysis[cite: 1].
+A Multi-Agent System (MAS) designed to monitor tool degradation during micro-milling of 20 cm steel channels[cite: 1]. The system uses a **Particle Filter (PF)** to predict Remaining Useful Life (RUL) and a **Confidence Interval (CI)** trigger to decide when ground-truth imaging is required[cite: 1].
 
-## 2. Agent Architecture & Operations
+## 2. Data Structure & Streaming
+*   **Channel Segmentation:** The force data from `hardstavaxtool15datalong.txt` is divided into **45 distinct channels** representing the 20 cm lines[cite: 1].
+*   **Downsampling:** High-frequency data is downsampled at a 1:20 ratio to maintain dashboard performance[cite: 1].
+*   **Iterative Arrival:** Data arrives channel-by-channel, simulating a real-time production environment[cite: 1].
 
-### 2.1 Leader Agent (The Decision Maker)
-*   **Role:** Acts as the central coordinator that processes inputs from all sub-agents to make a dynamic decision: **Continue**, **Stop for Image**, or **Replace Tool**[cite: 1].
-*   **Logic:** Employs an advanced, non-rule-based approach (e.g., Reinforcement Learning or a Markov Decision Process) to balance the trade-off between the high cost of stopping/imaging and the risk of tool failure[cite: 1].
-*   **Dynamic Weighting:** Must weigh the "noisy" high-frequency force trends against the "ground truth" but high-cost image data[cite: 1].
+## 3. Agent Architecture
 
-### 2.2 Force Data Agents (Real-Time Sub-Agents)
-These agents process streaming force data in the X and Y directions[cite: 1].
-*   **Amplitude & Zero-Point Analyst (`ForceDataAnalysisv11tool15.m`):** Analyzes the amplitude of minimum force and identifies 0-force points to detect cutting stability[cite: 1].
-*   **Histogram Analyst (`ForceDataAnalysisv13tool15.m`):** Provides a statistical distribution (histogram) of force data to identify shifts in cutting behavior[cite: 1].
-*   **Normal/Tangential Force Analyst (`run_Spline_Optimizer.m`):** Converts x-y coordinate force data into normal and tangential magnitudes to detect the rapid "plateau and spike" behavior indicative of end-of-life[cite: 1].
+### 3.1 Leader Agent (Decision & Trigger)
+*   **Anomaly Trigger:** When a new force data point arrives and falls **outside the previous Prediction Confidence Interval**, the Leader Agent triggers the Image Agent[cite: 1].
+*   **Decisions:**
+    *   **Continue:** If the data point is within the CI[cite: 1].
+    *   **Take Image:** If the data point is outside the CI (Model Mismatch)[cite: 1].
+    *   **Replace:** If the PF predicts a >90% probability of "Critical Status"[cite: 1].
 
-### 2.3 Image Analysis Agents (Intermittent Sub-Agents)
-These agents process high-resolution images of the cutting tool after specific channels are completed[cite: 1].
-*   **Tool Geometry Analyst (`wornarea.m`):** Calculates tool radius, corner radius, and the specific worn tool area[cite: 1].
-*   **Ideal Wear Calculator:** Implements the geometric equation to calculate the theoretical ideal worn area:
+### 3.2 Force Agent (Probabilistic Prediction)
+*   **Algorithm Integration:** Utilizes `ForceDataAnalysisv11tool15.m`, `ForceDataAnalysisv13tool15.m`, and `run_Spline_Optimizer.m`[cite: 1].
+*   **Prediction Engine:** Uses a Particle Filter to predict the tool wear trajectory until a critical threshold is reached[cite: 1].
+*   **Uncertainty Modeling:** Dynamically calculates the **Confidence Interval** for the next expected data point based on current particle weights[cite: 1].
+
+### 3.3 Image Agent (Ground Truth Calibration)
+*   **Feature Extraction:** Utilizes `wornarea.m` to calculate tool radius and actual worn area[cite: 1].
+*   **Geometric Validation:** Implements the Ideal Worn calculation:
     $$A_{ideal} = R_{fit}^2 \left( \cot\left(\frac{\theta}{2}\right) - \frac{\pi - \theta}{2} \right)$$
-*   **Wear Gap Detection:** Compares the actual worn area (from `wornarea.m`) against the geometric ideal wear to determine the tool wear increment[cite: 1].
+*   **K-Means Classification:** Uses a 3-centroid K-Means model (trained on `Tool_Features_Dataset.xlsx`) to categorize the image into **Factory New**, **Mid-Worn**, or **Critical Status**[cite: 1].
+*   **PF Reset:** Feeds this ground truth back to the Force Agent to "collapse" the particles and recalibrate the prediction[cite: 1].
 
-## 3. Data Pipeline & Processing
-*   **Streaming Simulation:** The system must simulate real-time data by reading `hardstavaxtool15datalong.txt`[cite: 1].
-*   **Downsampling:** To maintain system performance during high-frequency streaming, the data must be downsampled by taking 1 point for every 20-point interval[cite: 1].
-*   **Feature Categorization:** Predicted tool life must be clustered into three primary statuses: **Factory New**, **Mid-Worn**, and **Critical Status**[cite: 1].
-*   **Training Data:** Use `Tool_Features_Dataset.xlsx` (unlabeled feature extraction data) and images in the `TestData` folder for clustering and model training[cite: 1].
-
-## 4. Dashboard & Visualization
-*   **Framework:** Built using a Python-native framework (Streamlit or Plotly Dash) capable of high-speed updates[cite: 1].
-*   **Live Metrics:** Real-time visualization of streaming force data and the calculated normal/tangential magnitudes.
-*   **Status Indicators:** Visual indicators of the current tool status (New/Mid/Critical) and the Leader Agent's current decision.
-*   **Image Gallery:** Display of the latest tool images from the `TestData` folder when an "Image" decision is triggered.
+## 4. Dashboard Requirements (Python-Native)
+*   **Real-Time Plotting:** Displays iterative force arrivals and the evolving Particle Filter "cloud"[cite: 1].
+*   **Confidence Visuals:** Shows the prediction trajectory and the shaded Confidence Interval[cite: 1].
+*   **Image Feed:** Displays processed images from the `TestData` folder (mapped to the current channel) when an image decision is made[cite: 1].
+*   **State Monitor:** Shows the K-Means cluster result and current RUL prediction[cite: 1].
