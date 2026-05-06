@@ -108,12 +108,19 @@ def _compute_wear_signal(
     signal is the fused wear indicator normalised to [0.02, 1.0].
     ft_norm and fn_norm are in [0, 1] relative to running max.
     """
+    def _safe(v, default: float = 0.0) -> float:
+        try:
+            f = float(v)
+            return f if math.isfinite(f) else default
+        except Exception:
+            return default
+
     try:
         amp      = amp_agent.analyze(Fx, Fy)
-        avg_A    = float(amp.get("avg_FxA", 0.0) or 0.0)
-        avg_B    = float(amp.get("avg_FxB", 0.0) or 0.0)
+        avg_A    = _safe(amp.get("avg_FxA"))
+        avg_B    = _safe(amp.get("avg_FxB"))
         mean_amp = (avg_A + avg_B) / 2.0
-        runout   = float(amp.get("runout",  0.0) or 0.0)
+        runout   = _safe(amp.get("runout"))
     except Exception:
         mean_amp = float(np.mean(np.abs(Fx)))
         runout   = 0.0
