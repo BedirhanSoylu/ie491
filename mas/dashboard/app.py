@@ -486,7 +486,7 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         # Decision log
         # ==============================================================
         log      = st.get("decision_log", [])
-        log_data = list(reversed(log[-20:]))
+        log_data = list(reversed(log[-45:]))
 
         # ==============================================================
         # Status card values
