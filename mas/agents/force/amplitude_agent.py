@@ -4,6 +4,7 @@ Wraps agent_force_amplitude.m to extract tooth-level Fx statistics.
 """
 from __future__ import annotations
 
+import math
 import numpy as np
 
 from mas.agents.base_agent import BaseAgent
@@ -19,7 +20,15 @@ class AmplitudeZeroPointAgent(BaseAgent):
         Fx = np.asarray(Fx, dtype=np.float64)
         Fy = np.asarray(Fy, dtype=np.float64)
         if self.matlab_available:
-            return self._bridge.call_force_amplitude(Fx, Fy, fs, rpm)
+            result = self._bridge.call_force_amplitude(Fx, Fy, fs, rpm)
+            avg_a = result.get("avg_FxA")
+            avg_b = result.get("avg_FxB")
+            # MATLAB returns NaN when zero-crossing detection finds no triggers;
+            # fall back to Python so mean_amp stays meaningful.
+            if not (isinstance(avg_a, float) and math.isfinite(avg_a)) or \
+               not (isinstance(avg_b, float) and math.isfinite(avg_b)):
+                return self._python_fallback(Fx, Fy, fs, rpm)
+            return result
         return self._python_fallback(Fx, Fy, fs, rpm)
 
     @staticmethod
