@@ -58,8 +58,9 @@ for i = 1:steps
 end
 
 % --- Residuals ---
-r_x = Force_x - experimental_data(1:steps, 1)';
-r_y = Force_y - experimental_data(1:steps, 2)';
+steps = min(steps, size(experimental_data, 1));
+r_x = Force_x(1:steps) - experimental_data(1:steps, 1)';
+r_y = Force_y(1:steps) - experimental_data(1:steps, 2)';
 residuals = [r_x, r_y]';
 
 end
