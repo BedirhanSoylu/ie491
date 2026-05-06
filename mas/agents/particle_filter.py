@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-CRITICAL_THRESHOLD = 0.60
+CRITICAL_THRESHOLD = 0.35
 N_PARTICLES = 500
 
 
@@ -23,9 +23,9 @@ class ParticleFilter:
         self,
         n_particles: int = N_PARTICLES,
         critical_threshold: float = CRITICAL_THRESHOLD,
-        mu_drift: float = 0.006,
-        sigma_drift: float = 0.008,
-        sigma_obs: float = 0.07,
+        mu_drift: float = 0.004,
+        sigma_drift: float = 0.006,
+        sigma_obs: float = 0.05,
     ) -> None:
         self.n = n_particles
         self.critical_threshold = critical_threshold

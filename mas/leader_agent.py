@@ -16,13 +16,13 @@ from mas.agents.particle_filter import ParticleFilter
 
 CRITICAL_PROB_THRESHOLD = 0.90
 TAKE_IMAGE_COOLDOWN     = 7    # minimum channels between consecutive TAKE_IMAGE decisions
-_REPLACE_HYSTERESIS     = 2    # consecutive critical steps required before REPLACE
+_REPLACE_HYSTERESIS     = 3    # consecutive critical steps required before REPLACE
 
 # Canonical wear level per K-Means label (centre of the cluster in [0,1])
 _WEAR_LEVEL_MAP: dict[str, float] = {
-    "FACTORY_NEW": 0.10,
-    "MID_WORN":    0.45,
-    "CRITICAL":    0.80,
+    "FACTORY_NEW": 0.08,
+    "MID_WORN":    0.20,
+    "CRITICAL":    0.38,
 }
 
 
