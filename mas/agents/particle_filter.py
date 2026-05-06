@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-CRITICAL_THRESHOLD = 0.75
+CRITICAL_THRESHOLD = 0.60
 N_PARTICLES = 500
 
 
@@ -110,7 +110,7 @@ class ParticleFilter:
         return n_steps
 
     def future_trajectory(
-        self, n_steps: int = 15
+        self, n_steps: int = 25
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Simulate n_steps ahead from current state.
@@ -131,6 +131,67 @@ class ParticleFilter:
         """Return a random subset of current particles for visualisation."""
         idx = np.random.choice(self.n, min(max_display, self.n), replace=False)
         return self.particles[idx].copy()
+
+    # ------------------------------------------------------------------
+    # Fused multi-observation step
+    # ------------------------------------------------------------------
+
+    def step_fused(
+        self,
+        wear_obs: float,
+        ft_norm: float,
+        fn_norm: float,
+        w_wear: float = 0.65,
+        w_ft:   float = 0.20,
+        w_fn:   float = 0.15,
+    ) -> None:
+        """
+        Full PF cycle fusing wear signal, normalised Ft, and normalised Fn.
+        Forces are expected to increase monotonically with wear, so the
+        observation model assumes ft_norm and fn_norm approximate the wear
+        level but with wider noise (sigma * 1.5).
+        """
+        self.predict()
+        sig_f = self.sigma_obs * 1.5
+        log_w = (
+            w_wear * (-0.5 * ((self.particles - wear_obs) / self.sigma_obs) ** 2)
+            + w_ft * (-0.5 * ((self.particles - ft_norm)  / sig_f) ** 2)
+            + w_fn * (-0.5 * ((self.particles - fn_norm)  / sig_f) ** 2)
+        )
+        log_w -= log_w.max()
+        w = np.exp(log_w) + 1e-300
+        self.weights = w / w.sum()
+        self.resample()
+
+    def force_trajectory(
+        self,
+        ft_ref: float,
+        fn_ref: float,
+        n_steps: int = 15,
+        ft_slope: float = 1.5,
+        fn_slope: float = 2.0,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray,
+               np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Predict future Ft and Fn from the PF wear trajectory.
+        Forces scale linearly with predicted wear increase from current state.
+        Returns (ft_means, ft_lows, ft_highs, fn_means, fn_lows, fn_highs).
+        """
+        current_wear = self.state_mean()
+        fut_means, fut_lows, fut_highs = self.future_trajectory(n_steps)
+
+        def _scale(ref: float, slope: float, wears: np.ndarray) -> np.ndarray:
+            delta = np.clip(wears - current_wear, 0.0, 1.0)
+            return ref * (1.0 + slope * delta)
+
+        return (
+            _scale(ft_ref, ft_slope, fut_means),
+            _scale(ft_ref, ft_slope, fut_lows),
+            _scale(ft_ref, ft_slope, fut_highs),
+            _scale(fn_ref, fn_slope, fut_means),
+            _scale(fn_ref, fn_slope, fut_lows),
+            _scale(fn_ref, fn_slope, fut_highs),
+        )
 
     # ------------------------------------------------------------------
     # Ground-truth reset (called after K-Means classification on image)

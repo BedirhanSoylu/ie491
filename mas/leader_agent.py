@@ -15,6 +15,8 @@ from __future__ import annotations
 from mas.agents.particle_filter import ParticleFilter
 
 CRITICAL_PROB_THRESHOLD = 0.90
+TAKE_IMAGE_COOLDOWN     = 7    # minimum channels between consecutive TAKE_IMAGE decisions
+_REPLACE_HYSTERESIS     = 2    # consecutive critical steps required before REPLACE
 
 # Canonical wear level per K-Means label (centre of the cluster in [0,1])
 _WEAR_LEVEL_MAP: dict[str, float] = {
@@ -32,6 +34,9 @@ class LeaderAgent:
         self._next_ci_mean: float = mean
         self._next_ci_low:  float = lo
         self._next_ci_high: float = hi
+        # Throttle image-take decisions
+        self._steps_since_take_image: int = TAKE_IMAGE_COOLDOWN  # allow on first channel
+        self._consecutive_critical:   int = 0
 
     # ------------------------------------------------------------------
     # Main decision interface
@@ -48,17 +53,59 @@ class LeaderAgent:
         -------
         "CONTINUE" | "TAKE_IMAGE" | "REPLACE"
         """
-        # Run full PF update with this observation
         self.pf.step(observed_signal)
+        self._steps_since_take_image += 1
 
-        # Priority 1: replace if most particles are in critical zone
+        # Track consecutive critical steps for REPLACE hysteresis
         if self.pf.critical_probability() > CRITICAL_PROB_THRESHOLD:
+            self._consecutive_critical += 1
+        else:
+            self._consecutive_critical = 0
+
+        if self._consecutive_critical >= _REPLACE_HYSTERESIS:
             self._refresh_next_ci()
             return "REPLACE"
 
-        # Priority 2: model mismatch → image needed
-        if observed_signal < self._next_ci_low or observed_signal > self._next_ci_high:
+        # TAKE_IMAGE only when signal outside CI AND cooldown elapsed
+        outside_ci = (
+            observed_signal < self._next_ci_low
+            or observed_signal > self._next_ci_high
+        )
+        if outside_ci and self._steps_since_take_image >= TAKE_IMAGE_COOLDOWN:
             decision = "TAKE_IMAGE"
+            self._steps_since_take_image = 0
+        else:
+            decision = "CONTINUE"
+
+        self._refresh_next_ci()
+        return decision
+
+    def decide_fused(
+        self,
+        wear_signal: float,
+        ft_norm: float,
+        fn_norm: float,
+    ) -> str:
+        """PF step with fused observation (wear + normalised Ft + Fn)."""
+        self.pf.step_fused(wear_signal, ft_norm, fn_norm)
+        self._steps_since_take_image += 1
+
+        if self.pf.critical_probability() > CRITICAL_PROB_THRESHOLD:
+            self._consecutive_critical += 1
+        else:
+            self._consecutive_critical = 0
+
+        if self._consecutive_critical >= _REPLACE_HYSTERESIS:
+            self._refresh_next_ci()
+            return "REPLACE"
+
+        outside_ci = (
+            wear_signal < self._next_ci_low
+            or wear_signal > self._next_ci_high
+        )
+        if outside_ci and self._steps_since_take_image >= TAKE_IMAGE_COOLDOWN:
+            decision = "TAKE_IMAGE"
+            self._steps_since_take_image = 0
         else:
             decision = "CONTINUE"
 
