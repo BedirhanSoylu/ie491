@@ -219,27 +219,31 @@ def background_loop(
                 img_features, img_b64 = geo_agent.load_channel_image(channel)
                 if img_b64:
                     img_analysis = img_features
-                    if decision in ("TAKE_IMAGE", "REPLACE"):
+                    if decision in ("TAKE_IMAGE", "REPLACE") and MatlabBridge.get().available:
                         edge_r    = img_features.get("edge_radius_px", float("nan"))
                         tool_len  = img_features.get("tool_length_px", float("nan"))
                         worn_area = img_features.get("worn_area_px",   float("nan"))
                         if all(math.isfinite(v) for v in [edge_r, tool_len, worn_area]):
-                            if MatlabBridge.get().available:
-                                kmeans_label = classifier.predict(edge_r, tool_len, worn_area)
-                                leader.incorporate_image_truth(kmeans_label)
-                            else:
-                                cp = pf.critical_probability()
-                                kmeans_label = (
-                                    "FACTORY_NEW" if cp < 0.25 else
-                                    "MID_WORN"    if cp < 0.65 else
-                                    "CRITICAL"
-                                )
+                            kmeans_label = classifier.predict(edge_r, tool_len, worn_area)
+                            leader.incorporate_image_truth(kmeans_label)
                             print(f"  K-Means={kmeans_label}  "
                                   f"worn={worn_area:.0f}px  edge_r={edge_r:.1f}px")
                         else:
-                            print("  Image KPIs NaN — PF not collapsed")
+                            print("  Image KPIs NaN — K-Means skipped")
             except Exception as exc:
                 print(f"  Image load error: {exc}")
+
+        # Python-fallback K-Means: classify from PF state for every
+        # TAKE_IMAGE / REPLACE when MATLAB is not available.
+        # Runs unconditionally — does not need image features or finite KPIs.
+        if decision in ("TAKE_IMAGE", "REPLACE") and not MatlabBridge.get().available:
+            pf_mean_fb = pf.state_mean()
+            kmeans_label = (
+                "FACTORY_NEW" if pf_mean_fb < 0.333 else
+                "MID_WORN"    if pf_mean_fb < 0.50  else
+                "CRITICAL"
+            )
+            print(f"  K-Means(PF)={kmeans_label}  pf_mean={pf_mean_fb:.3f}")
 
         # 6. Tool state from PF (or K-Means when available)
         cp = pf.critical_probability()
