@@ -170,7 +170,7 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
 
             # ---- Row 2: Identified Spline Force Curves ----
             html.Div(
-                dcc.Graph(id="force-chart", style=dict(height="320px"),
+                dcc.Graph(id="force-chart", style=dict(height="360px"),
                           config=dict(displayModeBar=False)),
                 style=dict(marginBottom="16px"),
             ),
@@ -531,6 +531,41 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                             line=dict(color="white", width=0.8)),
             ))
 
+            # Prediction curves: scale current spline by PF wear projection
+            # ft_slope / fn_slope match particle_filter.py force_trajectory
+            FT_SLOPE = 1.5
+            FN_SLOPE = 2.0
+            future_means  = ch.get("future_means", [])
+            current_wear  = ch.get("pf_mean", 0.0)
+
+            pred_steps  = [4, 9, 14]   # +5, +10, +15 channels ahead
+            pred_alphas = [0.55, 0.35, 0.20]
+
+            for step_i, alpha in zip(pred_steps, pred_alphas):
+                if step_i >= len(future_means):
+                    continue
+                delta    = max(0.0, float(future_means[step_i]) - current_wear)
+                ft_pred  = ft_ctrl * (1.0 + FT_SLOPE * delta)
+                fn_pred  = fn_ctrl * (1.0 + FN_SLOPE * delta)
+                ft_pf    = _interp_spline(h_knots, ft_pred, H_FINE)
+                fn_pf    = _interp_spline(h_knots, fn_pred, H_FINE)
+                label    = f"+{step_i + 1} ch"
+
+                spline_fig.add_trace(go.Scatter(
+                    x=H_FINE, y=ft_pf, mode="lines",
+                    name=f"Ft pred {label}",
+                    line=dict(color=f"rgba(155,89,182,{alpha})",
+                              width=1.5, dash="dot"),
+                    hovertemplate=f"Pred {label}: h %{{x:.2f}} µm<br>Ft %{{y:.2f}} N/mm",
+                ))
+                spline_fig.add_trace(go.Scatter(
+                    x=H_FINE, y=fn_pf, mode="lines",
+                    name=f"Fn pred {label}",
+                    line=dict(color=f"rgba(26,188,156,{alpha})",
+                              width=1.5, dash="dot"),
+                    hovertemplate=f"Pred {label}: h %{{x:.2f}} µm<br>Fn %{{y:.2f}} N/mm",
+                ))
+
             # Plateau score badge
             plateau_score = ch.get("plateau_score", 1.0)
             p_col = (C["REPLACE"]   if plateau_score > 1.5 else
@@ -547,8 +582,8 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         spline_fig.update_layout(
             **_dark_layout(
                 f"Identified Spline Force Curves — Ch {sel}  "
-                f"(ghost = all channels, plateau → end-of-life)",
-                xl="Uncut Chip Thickness [µm]", yl="Force [N]",
+                f"| dashed = PF wear projection (+5/+10/+15 ch)",
+                xl="Uncut Chip Thickness [µm]", yl="Specific Force [N/mm]",
             )
         )
 

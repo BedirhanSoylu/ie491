@@ -2,12 +2,83 @@
 Normal / Tangential Force Spline Agent.
 Wraps agent_spline.m (B-spline optimizer) to extract Ft/Fn curves
 and detect the end-of-life plateau-then-spike pattern.
+
+Python fallback ports the identification problem from
+run_Spline_Optimizer.m + computeResiduals_Spline.m:
+  - Chip-thickness domain: h in [0, 0.005] mm (0-5 µm)
+  - B-spline control points Ft_ctrl, Fn_ctrl at h_knots
+  - Milling kinematics: hc = hmax*sin(phi + sin(phi)/100)
+  - Force model: Fx = b*(Ft*cos(phi) + Fn*sin(phi))
+                 Fy = b*(Ft*sin(phi) - Fn*cos(phi))
+  - Solved via linear-interp basis + NNLS (fast, non-negative)
 """
 from __future__ import annotations
 
 import numpy as np
 
 from mas.agents.base_agent import BaseAgent
+
+# Milling constants (must match computeResiduals_Spline.m)
+_HMAX   = 0.005   # max chip thickness [mm]
+_B      = 0.050   # axial depth of cut [mm]
+_N_CTRL = 16
+_STEPS  = 828
+
+
+def _build_kinematics(steps: int = _STEPS
+                      ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Returns (hc, phi, mask) for one revolution of micro-milling.
+    Matches MATLAB's computeResiduals_Spline.m exactly.
+    """
+    p1 = steps // 2
+    p2 = steps - p1
+    phis1 = np.linspace(0, np.pi, p1)
+    phis2 = np.linspace(0, np.pi, p2)
+    hc = np.concatenate([
+        _HMAX * np.sin(phis1 + np.sin(phis1) / 100.0),
+        _HMAX * np.sin(phis2 + np.sin(phis2) / 100.0),
+    ])
+    phi  = np.concatenate([phis1, phis2])
+    mask = hc > 0
+    return hc, phi, mask
+
+
+def _build_obs_matrix(hc: np.ndarray, phi: np.ndarray,
+                      mask: np.ndarray, h_knots: np.ndarray,
+                      n_ctrl: int) -> np.ndarray:
+    """
+    Build the linear observation matrix M such that
+      [Fx_masked; Fy_masked] ≈ M @ [Ft_ctrl; Fn_ctrl]
+    using linear-interpolation basis (fast, sufficient for Python fallback).
+    """
+    steps = len(hc)
+    dh = h_knots[1] - h_knots[0]
+
+    # Basis weight matrix W[i, k] = linear weight for h_knots[k] at hc[i]
+    W = np.zeros((steps, n_ctrl))
+    for i in np.where(mask)[0]:
+        j = min(int(hc[i] / dh), n_ctrl - 2)
+        alpha = (hc[i] - h_knots[j]) / dh
+        W[i, j]   = 1.0 - alpha
+        W[i, j+1] = alpha
+
+    sin_phi = np.sin(phi)
+    cos_phi = np.cos(phi)
+
+    # Force contributions per control point
+    A_ft_x =  _B * W * cos_phi[:, None]   # Ft → Fx
+    A_fn_x =  _B * W * sin_phi[:, None]   # Fn → Fx
+    A_ft_y =  _B * W * sin_phi[:, None]   # Ft → Fy
+    A_fn_y = -_B * W * cos_phi[:, None]   # Fn → Fy
+
+    m = int(mask.sum())
+    M = np.zeros((2 * m, 2 * n_ctrl))
+    M[:m, :n_ctrl]  = A_ft_x[mask]
+    M[:m, n_ctrl:]  = A_fn_x[mask]
+    M[m:, :n_ctrl]  = A_ft_y[mask]
+    M[m:, n_ctrl:]  = A_fn_y[mask]
+    return M
 
 
 class SplineAgent(BaseAgent):
@@ -20,35 +91,65 @@ class SplineAgent(BaseAgent):
 
     @staticmethod
     def _python_fallback(Fx: np.ndarray, Fy: np.ndarray) -> dict:
-        from scipy.interpolate import UnivariateSpline  # type: ignore
-        n = len(Fx)
-        t = np.linspace(0, 1, n)
-        ctrl_t = np.linspace(0, 1, 16)
+        """
+        Identify Ft(h) and Fn(h) in the chip-thickness domain via NNLS.
+        Control points are in N/mm (specific force), x-axis is 0-5 µm.
+        Plateau score mirrors agent_spline.m: end_slope / start_slope > 1
+        signals the rapid post-plateau force rise at end-of-life.
+        """
+        try:
+            from scipy.optimize import nnls  # type: ignore
+        except ImportError:
+            return SplineAgent._linear_fallback(Fx, Fy)
 
-        def fit_ctrl(sig: np.ndarray) -> np.ndarray:
-            try:
-                spl = UnivariateSpline(t, sig, s=len(sig) * np.var(sig) * 0.1, k=3)
-                return spl(ctrl_t)
-            except Exception:
-                return np.interp(ctrl_t, t, sig)
+        n_ctrl  = _N_CTRL
+        steps   = min(_STEPS, len(Fx))
+        Fx_s    = Fx[:steps]
+        Fy_s    = Fy[:steps]
 
-        ft_ctrl = fit_ctrl(Fx)
-        fn_ctrl = fit_ctrl(Fy)
+        h_knots = np.linspace(0, _HMAX, n_ctrl)
+        hc, phi, mask = _build_kinematics(steps)
+        M = _build_obs_matrix(hc, phi, mask, h_knots, n_ctrl)
+        rhs = np.concatenate([Fx_s[mask], Fy_s[mask]])
 
-        # Plateau score: ratio of last-quarter RMS to first-quarter RMS
-        q = max(n // 4, 1)
-        rms_start = float(np.sqrt(np.mean(Fx[:q] ** 2)) + 1e-9)
-        rms_end   = float(np.sqrt(np.mean(Fx[-q:] ** 2)) + 1e-9)
-        plateau_score = rms_end / rms_start
+        try:
+            x_opt, rnorm = nnls(M, rhs)
+            ft_ctrl = x_opt[:n_ctrl]
+            fn_ctrl = x_opt[n_ctrl:]
+            rmse = float(rnorm / np.sqrt(max(2 * int(mask.sum()), 1)))
+        except Exception:
+            ft_ctrl = np.linspace(0, 36, n_ctrl)
+            fn_ctrl = np.linspace(0, 22, n_ctrl)
+            rmse = float("nan")
 
-        fit_vals = np.interp(t, ctrl_t, ft_ctrl)
-        rmse = float(np.sqrt(np.mean((Fx - fit_vals) ** 2)))
+        ft_max = float(np.max(ft_ctrl))
+        fn_max = float(np.max(fn_ctrl))
+
+        # Plateau score: terminal slope / initial slope on Ft (mirrors MATLAB)
+        end_slope   = (ft_ctrl[-1] - ft_ctrl[-3]) / 2.0
+        start_slope = (ft_ctrl[2]  - ft_ctrl[0])  / 2.0
+        plateau_score = float(end_slope / (abs(start_slope) + 1e-9))
 
         return {
-            "ft_ctrl":       ft_ctrl,
-            "fn_ctrl":       fn_ctrl,
-            "ft_max":        float(np.max(np.abs(ft_ctrl))),
-            "fn_max":        float(np.max(np.abs(fn_ctrl))),
+            "ft_ctrl":       ft_ctrl.tolist(),
+            "fn_ctrl":       fn_ctrl.tolist(),
+            "ft_max":        ft_max,
+            "fn_max":        fn_max,
             "plateau_score": plateau_score,
             "rmse":          rmse,
+        }
+
+    @staticmethod
+    def _linear_fallback(Fx: np.ndarray, Fy: np.ndarray) -> dict:
+        """Last-resort fallback when scipy is not available."""
+        n_ctrl  = _N_CTRL
+        ft_ctrl = np.linspace(0, max(float(np.max(np.abs(Fx))), 1e-9), n_ctrl)
+        fn_ctrl = np.linspace(0, max(float(np.max(np.abs(Fy))), 1e-9), n_ctrl)
+        return {
+            "ft_ctrl":       ft_ctrl.tolist(),
+            "fn_ctrl":       fn_ctrl.tolist(),
+            "ft_max":        float(ft_ctrl[-1]),
+            "fn_max":        float(fn_ctrl[-1]),
+            "plateau_score": 1.0,
+            "rmse":          float("nan"),
         }
