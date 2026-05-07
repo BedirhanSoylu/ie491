@@ -160,10 +160,24 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                 ], style=dict(width="28%")),
             ], style=dict(display="flex", marginBottom="16px")),
 
-            # ---- Row 2: Image panel ----
+            # ---- Row 2: Tangential / Normal force chart ----
+            html.Div(
+                dcc.Graph(id="force-chart", style=dict(height="300px"),
+                          config=dict(displayModeBar=False)),
+                style=dict(marginBottom="16px"),
+            ),
+
+            # ---- Row 3: Image panel ----
             html.Div(id="image-panel", children=[]),
 
-            # ---- Row 3: Decision log ----
+            # ---- Row 3: Particle histogram ----
+            html.Div(
+                dcc.Graph(id="particle-hist", style=dict(height="280px"),
+                          config=dict(displayModeBar=False)),
+                style=dict(marginBottom="16px"),
+            ),
+
+            # ---- Row 4: Decision log ----
             html.Div([
                 html.H5("Decision Log",
                         style=dict(color=C["text"], margin="0 0 8px 0")),
@@ -215,6 +229,8 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         [
             Output("header-meta",      "children"),
             Output("pf-plot",          "figure"),
+            Output("particle-hist",    "figure"),
+            Output("force-chart",      "figure"),
             Output("state-val",        "children"),
             Output("state-badge",      "children"),
             Output("state-badge",      "style"),
@@ -399,6 +415,147 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         pf_fig.update_yaxes(range=[-0.02, 1.05])
 
         # ==============================================================
+        # Particle histogram for selected channel
+        # ==============================================================
+        hist_particles = (ch.get("particles") if ch else None) or st.get("particles", [])
+        hist_pf_mean   = (ch.get("pf_mean",       0.0)  if ch else st.get("pf_mean",       0.0))
+        hist_crit_p    = (ch.get("critical_prob",  0.0)  if ch else st.get("critical_prob", 0.0))
+
+        hist_fig = go.Figure()
+        if hist_particles:
+            hist_fig.add_trace(go.Histogram(
+                x=hist_particles,
+                nbinsx=30,
+                marker_color="rgba(255,215,0,0.55)",
+                marker_line=dict(color="rgba(255,215,0,0.9)", width=0.6),
+                name="Particles",
+                hovertemplate="Wear %{x:.3f}<br>Count %{y}",
+            ))
+
+        hist_fig.add_vline(
+            x=CRITICAL_THRESHOLD,
+            line=dict(color=C["threshold"], dash="dash", width=2),
+            annotation_text=f"Critical ({CRITICAL_THRESHOLD})",
+            annotation_font_color=C["threshold"],
+            annotation_position="top right",
+        )
+        hist_fig.add_vline(
+            x=hist_pf_mean,
+            line=dict(color=C["CONTINUE"], dash="dot", width=1.8),
+            annotation_text=f"Mean {hist_pf_mean:.3f}",
+            annotation_font_color=C["CONTINUE"],
+            annotation_position="top left",
+        )
+        hist_fig.update_layout(
+            **_dark_layout(
+                f"Particle Distribution — Ch {sel}  |  Crit {hist_crit_p*100:.0f}%",
+                xl="Wear Level [0–1]", yl="Count",
+            )
+        )
+        hist_fig.update_xaxes(range=[0.0, 1.0])
+
+        # ==============================================================
+        # Tangential (Ft) / Normal (Fn) force history + predictions
+        # ==============================================================
+        ft_hist = st.get("ft_history", [])
+        force_fig = go.Figure()
+
+        if ft_hist:
+            ch_hist  = [e["channel"] for e in ft_hist]
+            ft_vals  = [e["ft_max"]  for e in ft_hist]
+            fn_vals  = [e["fn_max"]  for e in ft_hist]
+
+            # --- Ft history ---
+            force_fig.add_trace(go.Scatter(
+                x=ch_hist, y=ft_vals,
+                mode="lines+markers",
+                name="Ft (tangential)",
+                line=dict(color=C["ft"], width=1.8),
+                marker=dict(color=C["ft"], size=5),
+                hovertemplate="Ch %{x}<br>Ft %{y:.3f} N",
+            ))
+            # --- Fn history ---
+            force_fig.add_trace(go.Scatter(
+                x=ch_hist, y=fn_vals,
+                mode="lines+markers",
+                name="Fn (normal)",
+                line=dict(color=C["fn"], width=1.8),
+                marker=dict(color=C["fn"], size=5),
+                hovertemplate="Ch %{x}<br>Fn %{y:.3f} N",
+            ))
+
+            # Highlight selected channel
+            sel_entry = next((e for e in ft_hist if e["channel"] == sel), None)
+            if sel_entry:
+                force_fig.add_trace(go.Scatter(
+                    x=[sel], y=[sel_entry["ft_max"]],
+                    mode="markers",
+                    marker=dict(color="gold", size=14, symbol="star",
+                                line=dict(color="white", width=1.2)),
+                    name=f"Ft Ch {sel} (selected)", showlegend=False,
+                ))
+                force_fig.add_trace(go.Scatter(
+                    x=[sel], y=[sel_entry["fn_max"]],
+                    mode="markers",
+                    marker=dict(color="gold", size=14, symbol="star",
+                                line=dict(color="white", width=1.2)),
+                    name=f"Fn Ch {sel} (selected)", showlegend=False,
+                ))
+
+        # --- Ft predicted CI band anchored at last observed ---
+        ft_m  = st.get("future_ft_means",   [])
+        ft_lo = st.get("future_ft_ci_low",  [])
+        ft_hi = st.get("future_ft_ci_high", [])
+        fn_m  = st.get("future_fn_means",   [])
+        fn_lo = st.get("future_fn_ci_low",  [])
+        fn_hi = st.get("future_fn_ci_high", [])
+
+        if ft_hist and ft_m:
+            last_ch  = ft_hist[-1]["channel"]
+            fut_chs  = list(range(last_ch, last_ch + len(ft_m) + 1))
+            last_ft  = ft_hist[-1]["ft_max"]
+            last_fn  = ft_hist[-1]["fn_max"]
+
+            anch_ft_m  = [last_ft]  + list(ft_m)
+            anch_ft_lo = [last_ft]  + list(ft_lo)
+            anch_ft_hi = [last_ft]  + list(ft_hi)
+            anch_fn_m  = [last_fn]  + list(fn_m)
+            anch_fn_lo = [last_fn]  + list(fn_lo)
+            anch_fn_hi = [last_fn]  + list(fn_hi)
+
+            force_fig.add_trace(go.Scatter(
+                x=fut_chs + list(reversed(fut_chs)),
+                y=anch_ft_hi + list(reversed(anch_ft_lo)),
+                fill="toself", fillcolor=C["ft_fill"],
+                line=dict(color="rgba(0,0,0,0)"),
+                hoverinfo="skip", name="Ft 90% CI",
+            ))
+            force_fig.add_trace(go.Scatter(
+                x=fut_chs, y=anch_ft_m,
+                mode="lines",
+                line=dict(color=C["ft"], width=1.5, dash="dot"),
+                name="Ft predicted",
+            ))
+            force_fig.add_trace(go.Scatter(
+                x=fut_chs + list(reversed(fut_chs)),
+                y=anch_fn_hi + list(reversed(anch_fn_lo)),
+                fill="toself", fillcolor=C["fn_fill"],
+                line=dict(color="rgba(0,0,0,0)"),
+                hoverinfo="skip", name="Fn 90% CI",
+            ))
+            force_fig.add_trace(go.Scatter(
+                x=fut_chs, y=anch_fn_m,
+                mode="lines",
+                line=dict(color=C["fn"], width=1.5, dash="dot"),
+                name="Fn predicted",
+            ))
+
+        force_fig.update_layout(
+            **_dark_layout("Tangential (Ft) & Normal (Fn) Force History + Prediction",
+                           yl="Force [N]")
+        )
+
+        # ==============================================================
         # Image panel — shown for any channel that has an image
         # ==============================================================
         image_panel: list = []
@@ -498,6 +655,8 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         return (
             header,
             pf_fig,
+            hist_fig,
+            force_fig,
             tool_state,  tool_state,  _badge(s_col),
             decision,    decision,    _badge(d_col),
             str(rul),

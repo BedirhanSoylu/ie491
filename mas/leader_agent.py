@@ -21,8 +21,8 @@ _REPLACE_HYSTERESIS     = 3    # consecutive critical steps required before REPL
 # Canonical wear level per K-Means label (centre of the cluster in [0,1])
 _WEAR_LEVEL_MAP: dict[str, float] = {
     "FACTORY_NEW": 0.08,
-    "MID_WORN":    0.20,
-    "CRITICAL":    0.38,
+    "MID_WORN":    0.26,
+    "CRITICAL":    0.50,
 }
 
 

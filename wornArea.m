@@ -11,13 +11,17 @@ function wornArea()
     if size(img_new, 3) == 3, img_new = rgb2gray(img_new); end
     
     % Yeni takım için maske oluşturma (Referans Maske)
-    img_new_blur = imgaussfilt(img_new, 2);
+    img_new(img_new > prctile(double(img_new(:)), 95)) = uint8(prctile(double(img_new(:)), 95));
+    img_new = medfilt2(img_new, [3 3]);
+    img_new = imadjust(img_new);
+    img_new_blur = imgaussfilt(img_new, 3);
     level_new = graythresh(img_new_blur);
     mask_new = imbinarize(img_new_blur, level_new);
-    se = strel('disk', 5);
+    se = strel('disk', 4);
     mask_new = imclose(mask_new, se);
     mask_new = imopen(mask_new, se);
     mask_new = bwareafilt(mask_new, 1);
+    mask_new = imfill(mask_new, 'holes');
     
     % Hizalama (Registration) ayarları
     [optimizer, metric] = imregconfig('monomodal');
@@ -58,13 +62,17 @@ function wornArea()
                 idx = length(FileNames) + 1;
                 
                 % --- 2. Maske Çıkarma ---
-                img_worn_blur = imgaussfilt(img_worn, 2);
+                img_worn(img_worn > prctile(double(img_worn(:)), 95)) = uint8(prctile(double(img_worn(:)), 95));
+                img_worn = medfilt2(img_worn, [3 3]);
+                img_worn = imadjust(img_worn);
+                img_worn_blur = imgaussfilt(img_worn, 3);
                 level_worn = graythresh(img_worn_blur);
                 mask_worn = imbinarize(img_worn_blur, level_worn);
-                
+
                 mask_worn = imclose(mask_worn, se);
                 mask_worn = imopen(mask_worn, se);
                 mask_worn = bwareafilt(mask_worn, 1);
+                mask_worn = imfill(mask_worn, 'holes');
                 
                 % --- 3. Takım Uzunluğu (Tool Length) ---
                 [rows, cols] = find(mask_worn);

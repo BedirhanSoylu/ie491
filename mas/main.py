@@ -243,10 +243,11 @@ def background_loop(
 
         # 6. Tool state from PF (or K-Means when available)
         cp = pf.critical_probability()
+        pf_mean_now = pf.state_mean()
         tool_state = (
             kmeans_label if kmeans_label not in ("-",) else
-            "FACTORY_NEW" if cp < 0.25 else
-            "MID_WORN"    if cp < 0.65 else
+            "FACTORY_NEW" if pf_mean_now < 0.333 else
+            "MID_WORN"    if pf_mean_now < 0.50 else
             "CRITICAL"
         )
 
