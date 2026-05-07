@@ -112,11 +112,23 @@ class SplineAgent(BaseAgent):
         M = _build_obs_matrix(hc, phi, mask, h_knots, n_ctrl)
         rhs = np.concatenate([Fx_s[mask], Fy_s[mask]])
 
+        # Tikhonov smoothness regularisation: penalise large differences
+        # between adjacent control points so the identified curves are smooth.
+        # lambda chosen to balance data fit vs smoothness.
+        LAMBDA = 3.0
+        D = np.diff(np.eye(n_ctrl), axis=0)          # (n_ctrl-1) × n_ctrl
+        Z = np.zeros_like(D)
+        D_full = np.block([[D, Z], [Z, D]])           # joint Ft + Fn block
+        M_aug  = np.vstack([M,         LAMBDA * D_full])
+        rhs_aug = np.concatenate([rhs, np.zeros(2 * (n_ctrl - 1))])
+
         try:
-            x_opt, rnorm = nnls(M, rhs)
+            x_opt, rnorm = nnls(M_aug, rhs_aug)
             ft_ctrl = x_opt[:n_ctrl]
             fn_ctrl = x_opt[n_ctrl:]
-            rmse = float(rnorm / np.sqrt(max(2 * int(mask.sum()), 1)))
+            m = int(mask.sum())
+            rmse = float(np.linalg.norm(M[:2*m] @ x_opt - rhs) /
+                         np.sqrt(max(2 * m, 1)))
         except Exception:
             ft_ctrl = np.linspace(0, 36, n_ctrl)
             fn_ctrl = np.linspace(0, 22, n_ctrl)
@@ -125,10 +137,13 @@ class SplineAgent(BaseAgent):
         ft_max = float(np.max(ft_ctrl))
         fn_max = float(np.max(fn_ctrl))
 
-        # Plateau score: terminal slope / initial slope on Ft (mirrors MATLAB)
+        # Plateau score: terminal slope / initial slope on Ft (mirrors MATLAB).
+        # Clamped to [-10, 10] — extreme values indicate poor fit, not wear.
         end_slope   = (ft_ctrl[-1] - ft_ctrl[-3]) / 2.0
         start_slope = (ft_ctrl[2]  - ft_ctrl[0])  / 2.0
-        plateau_score = float(end_slope / (abs(start_slope) + 1e-9))
+        plateau_score = float(np.clip(
+            end_slope / (abs(start_slope) + 1e-9), -10.0, 10.0
+        ))
 
         return {
             "ft_ctrl":       ft_ctrl.tolist(),
