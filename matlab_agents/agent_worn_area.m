@@ -15,8 +15,6 @@ function [edge_radius_px, tool_length_px, worn_area_px, ideal_worn_area_px] = ag
     worn_img_path  = char(worn_img_path);
     fresh_img_path = char(fresh_img_path);
 
-    IDEAL_AREA_CONST = cosd(40)^3/sind(40) + sind(40)*cosd(40) - 5*pi/18;
-
     edge_radius_px       = NaN;
     tool_length_px       = NaN;
     worn_area_px         = NaN;
@@ -84,10 +82,53 @@ function [edge_radius_px, tool_length_px, worn_area_px, ideal_worn_area_px] = ag
         edge_radius_px = NaN;
     end
 
-    % --- Ideal Worn Area ---
-    if ~isnan(edge_radius_px) && edge_radius_px > 0
-        ideal_worn_area_px = edge_radius_px^2 * IDEAL_AREA_CONST;
-    end
+    % --- Ideal Worn Area (Apollonius PLL solver from mask) ---
+    ideal_worn_area_px = apollonius_pll_ideal_area(mask_worn);
+end
+
+% --- Apollonius PLL solver (same as in wornArea.m) ---
+function area = apollonius_pll_ideal_area(mask)
+    area = NaN;
+    [all_rows, all_cols] = find(mask);
+    if numel(all_rows) < 10, return; end
+    rows_f = double(all_rows); cols_f = double(all_cols);
+    dists = sqrt(rows_f.^2 + cols_f.^2);
+    [max_d, ~] = max(dists);
+    tie_idx = find(abs(dists - max_d) < 1e-6);
+    [~, sub] = min(cols_f(tie_idx));
+    p_idx = tie_idx(sub);
+    Px = cols_f(p_idx); Py = rows_f(p_idx);
+    y_min = min(rows_f);
+    top_mask = rows_f <= y_min + 10;
+    y_top = mean(rows_f(top_mask));
+    x_min = min(cols_f);
+    left_mask = cols_f <= x_min + 1;
+    xRef = x_min; yRef = min(rows_f(left_mask));
+    m = -tand(100);
+    if abs(m) < 1e-9, return; end
+    xV = (y_top - yRef) / m + xRef; yV = y_top;
+    d_top = [1,0]; d_left = [1,m]/sqrt(1+m^2);
+    b_raw = d_top + d_left; bn = norm(b_raw);
+    if bn < 1e-9, return; end
+    b = b_raw / bn;
+    VP = [Px-xV, Py-yV];
+    if dot(b,VP) < 0, b = -b; end
+    cos_a = max(-1, min(1, dot(d_top, d_left)));
+    theta = acos(cos_a)/2;
+    if sin(theta) < 1e-9, return; end
+    omega = [xV-Px, yV-Py];
+    A_c = cos(theta)^2; B_c = 2*dot(omega,b); C_c = dot(omega,omega);
+    disc = B_c^2 - 4*A_c*C_c;
+    if disc < 0, return; end
+    sq = sqrt(disc);
+    t1 = (-B_c+sq)/(2*A_c); t2 = (-B_c-sq)/(2*A_c);
+    pos_t = [t1,t2]; pos_t = pos_t(pos_t>0);
+    if isempty(pos_t), return; end
+    t = min(pos_t); r = t*sin(theta);
+    if r <= 0 || ~isfinite(r), return; end
+    cot_theta = cos(theta)/sin(theta);
+    area = r^2*(cot_theta - (pi/2 - theta));
+    if area < 0, area = NaN; end
 end
 
 % =============================================================

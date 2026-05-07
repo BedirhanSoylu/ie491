@@ -34,9 +34,6 @@ function wornArea()
     
     folderList = dir(baseDir);
 
-    % Ideal worn area constant: r^2 * (cos^3(40)/sin(40) + sin(40)*cos(40) - 5*pi/18)
-    IDEAL_AREA_CONST = cosd(40)^3/sind(40) + sind(40)*cosd(40) - 5*pi/18;
-
     % Veri seti için dizileri kesin veri tipleriyle başlatıyoruz
     FileNames = {};                 % Metinler (String/Char) için Cell Array
     Channels = zeros(0, 1);         % Sayılar (Double) için sayısal dizi
@@ -115,12 +112,8 @@ function wornArea()
                     R_L = NaN; R_R = NaN;
                 end
                 
-                % --- 6. Ideal Worn Area ---
-                if ~isnan(current_edge_radius) && current_edge_radius > 0
-                    ideal_worn_area = current_edge_radius^2 * IDEAL_AREA_CONST;
-                else
-                    ideal_worn_area = NaN;
-                end
+                % --- 6. Ideal Worn Area (Apollonius PLL solver from mask) ---
+                ideal_worn_area = apollonius_pll_ideal_area(mask_worn);
 
                 % --- 7. GÜVENLİ VERİ KAYDEDİCİ ---
                 FileNames{idx, 1} = imgName;
@@ -189,6 +182,95 @@ function wornArea()
     writetable(datasetTable, excelFileName);
     
     fprintf('\nOtomasyon tamamlandı!\n- Çıktılar (Excel): %s\n- Gözle doğrulama görselleri: %s klasörüne kaydedildi.\n', excelFileName, outputDir);
+end
+
+% =========================================================
+% APOLLONIUS PLL IDEAL WORN AREA SOLVER
+% =========================================================
+
+function area = apollonius_pll_ideal_area(mask)
+% Full Apollonius PLL geometric solver from binary tool mask.
+% Returns ideal worn area in pixels^2, or NaN on failure.
+%
+% Step 1 : P  = mask pixel with max Euclidean distance from image origin.
+% Step 2 : L_Top  = horizontal at mean y of top-10-row band.
+% Step 3 : L_Left = line through leftmost pixel, slope = -tan(100 deg) image coords.
+% Step 4 : V  = intersection of L_Top and L_Left.
+% Step 5 : Angle bisector b pointing toward P; half-angle theta.
+% Step 6 : Quadratic -> t -> r = t*sin(theta).
+% Step 7 : Area = r^2 * (cot(theta) - (pi/2 - theta)).
+
+    area = NaN;
+    [all_rows, all_cols] = find(mask);
+    if numel(all_rows) < 10, return; end
+
+    rows_f = double(all_rows);
+    cols_f = double(all_cols);
+
+    % --- Step 1: Point P ---
+    dists = sqrt(rows_f.^2 + cols_f.^2);
+    [max_d, ~] = max(dists);
+    tie_idx = find(abs(dists - max_d) < 1e-6);
+    [~, sub] = min(cols_f(tie_idx));
+    p_idx = tie_idx(sub);
+    Px = cols_f(p_idx);  Py = rows_f(p_idx);
+
+    % --- Step 2: L_Top ---
+    y_min = min(rows_f);
+    top_mask = rows_f <= y_min + 10;
+    y_top = mean(rows_f(top_mask));
+
+    % --- Step 3: L_Left ---
+    x_min = min(cols_f);
+    left_mask = cols_f <= x_min + 1;
+    xRef = x_min;
+    yRef = min(rows_f(left_mask));
+    m = -tand(100);   % ≈ +5.671 in image coords (y downward)
+
+    % --- Step 4: Vertex V ---
+    if abs(m) < 1e-9, return; end
+    xV = (y_top - yRef) / m + xRef;
+    yV = y_top;
+
+    % --- Step 5: Direction vectors and bisector ---
+    d_top  = [1, 0];
+    d_left = [1, m] / sqrt(1 + m^2);
+    b_raw  = d_top + d_left;
+    b_norm = norm(b_raw);
+    if b_norm < 1e-9, return; end
+    b = b_raw / b_norm;
+
+    VP = [Px - xV, Py - yV];
+    if dot(b, VP) < 0, b = -b; end
+
+    cos_a = max(-1, min(1, dot(d_top, d_left)));
+    theta = acos(cos_a) / 2;
+    if sin(theta) < 1e-9, return; end
+
+    % --- Step 6: Quadratic ---
+    omega = [xV - Px, yV - Py];
+    A_c = cos(theta)^2;
+    B_c = 2 * dot(omega, b);
+    C_c = dot(omega, omega);
+
+    disc = B_c^2 - 4*A_c*C_c;
+    if disc < 0, return; end
+
+    sq = sqrt(disc);
+    t1 = (-B_c + sq) / (2*A_c);
+    t2 = (-B_c - sq) / (2*A_c);
+    pos_t = [t1, t2];
+    pos_t = pos_t(pos_t > 0);
+    if isempty(pos_t), return; end
+    t = min(pos_t);
+
+    r = t * sin(theta);
+    if r <= 0 || ~isfinite(r), return; end
+
+    % --- Step 7: Area ---
+    cot_theta = cos(theta) / sin(theta);
+    area = r^2 * (cot_theta - (pi/2 - theta));
+    if area < 0, area = NaN; end
 end
 
 % =========================================================
