@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-CRITICAL_THRESHOLD = 0.45
+CRITICAL_THRESHOLD = 0.5
 N_PARTICLES = 500
 
 

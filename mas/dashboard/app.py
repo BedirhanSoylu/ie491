@@ -7,10 +7,10 @@ Header  : live status bar (channel | decision | RUL | crit%)
 Slider  : channel selector 1-45 (inspect any processed channel)
 Row 1   : PF Overview plot (all channels, future CI anchored to last obs)  70%
           Status cards                                                      30%
-Row 2   : Raw force Fx/Fy for selected channel                             50%
-          Ft/Fn Force History + Predictions (all channels)                 50%
-Row 3   : Ft / Fn B-spline curves for selected channel                     50%
-          Particle histogram at selected channel                            50%
+Row 2   : Identified Spline Force Curves (run_Spline_Optimizer) for sel ch
+          Ghost traces for all processed channels; plateau → end-of-life
+Row 3   : Image analysis panel (TAKE_IMAGE or REPLACE decisions with image)
+          Particle histogram at selected channel
 Row 4   : Image analysis panel (TAKE_IMAGE or REPLACE decisions with image)
 Row 5   : Decision log table
 
@@ -21,10 +21,11 @@ PF Overview:
   - future trajectory + 90% CI band ANCHORED at the last observed point
   - red dashed critical threshold at 0.75
 
-Ft/Fn Prediction chart:
-  - Historical Ft_max and Fn_max dots per channel
-  - From the last processed channel: predicted Ft/Fn means + 90% CI bands
-    anchored at the last observed value so continuity is preserved
+Spline Curves chart (run_Spline_Optimizer):
+  - Pchip-interpolated Ft and Fn curves vs uncut chip thickness [0-5 µm]
+  - B-spline control points as markers
+  - Ghost traces for all processed channels (wear progression visible)
+  - Plateau score annotation; rapid post-plateau rise → end-of-life signal
 """
 from __future__ import annotations
 
@@ -33,9 +34,16 @@ import copy
 import threading
 from typing import Any
 
+import numpy as np
 import dash
 import plotly.graph_objs as go
 from dash import dcc, html, Input, Output, State, dash_table
+
+try:
+    from scipy.interpolate import PchipInterpolator as _Pchip
+    _HAS_SCIPY = True
+except ImportError:
+    _HAS_SCIPY = False
 
 from mas.agents.particle_filter import CRITICAL_THRESHOLD
 
@@ -160,9 +168,9 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                 ], style=dict(width="28%")),
             ], style=dict(display="flex", marginBottom="16px")),
 
-            # ---- Row 2: Tangential / Normal force chart ----
+            # ---- Row 2: Identified Spline Force Curves ----
             html.Div(
-                dcc.Graph(id="force-chart", style=dict(height="300px"),
+                dcc.Graph(id="force-chart", style=dict(height="320px"),
                           config=dict(displayModeBar=False)),
                 style=dict(marginBottom="16px"),
             ),
@@ -263,7 +271,8 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         tool_state = st.get("tool_state", "FACTORY_NEW")
         rul        = st.get("rul",         45)
         crit_p     = st.get("critical_prob", 0.0)
-        kmeans     = st.get("kmeans_result", "-")
+        # Prefer the selected channel's K-Means label; fall back to latest global
+        kmeans = (ch.get("kmeans_label", "-") if ch else None) or st.get("kmeans_result", "-")
 
         header = (f"Streaming: Ch {latest_ch}/45  |  "
                   f"RUL {rul} ch  |  Crit {crit_p*100:.0f}%  |  "
@@ -455,104 +464,92 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         hist_fig.update_xaxes(range=[0.0, 1.0])
 
         # ==============================================================
-        # Tangential (Ft) / Normal (Fn) force history + predictions
+        # Identified Spline Force Curves (run_Spline_Optimizer style)
+        # Ghost traces for all processed channels; selected channel prominent.
+        # Plateau → rapid rise after flat region signals end-of-life.
         # ==============================================================
-        ft_hist = st.get("ft_history", [])
-        force_fig = go.Figure()
+        spline_fig = go.Figure()
 
-        if ft_hist:
-            ch_hist  = [e["channel"] for e in ft_hist]
-            ft_vals  = [e["ft_max"]  for e in ft_hist]
-            fn_vals  = [e["fn_max"]  for e in ft_hist]
+        def _interp_spline(h_k: np.ndarray, ctrl: np.ndarray,
+                           h_f: np.ndarray) -> np.ndarray:
+            if _HAS_SCIPY:
+                return _Pchip(h_k, ctrl)(h_f)
+            return np.interp(h_f, h_k, ctrl)
 
-            # --- Ft history ---
-            force_fig.add_trace(go.Scatter(
-                x=ch_hist, y=ft_vals,
-                mode="lines+markers",
-                name="Ft (tangential)",
-                line=dict(color=C["ft"], width=1.8),
-                marker=dict(color=C["ft"], size=5),
-                hovertemplate="Ch %{x}<br>Ft %{y:.3f} N",
+        H_FINE = np.linspace(0, 5.0, 200)   # chip thickness axis [µm]
+
+        # Ghost traces — all channels except selected
+        ghost_chs = sorted(k for k in hist if k != sel and hist[k].get("ft_ctrl"))
+        for g_ch in ghost_chs:
+            g = hist[g_ch]
+            ft_c = np.array(g["ft_ctrl"], dtype=float)
+            fn_c = np.array(g["fn_ctrl"], dtype=float)
+            h_k  = np.linspace(0, 5.0, len(ft_c))
+            ft_f = _interp_spline(h_k, ft_c, H_FINE)
+            fn_f = _interp_spline(h_k, fn_c, H_FINE)
+            spline_fig.add_trace(go.Scatter(
+                x=H_FINE, y=ft_f, mode="lines",
+                line=dict(color="rgba(155,89,182,0.10)", width=1),
+                showlegend=False, hoverinfo="skip",
             ))
-            # --- Fn history ---
-            force_fig.add_trace(go.Scatter(
-                x=ch_hist, y=fn_vals,
-                mode="lines+markers",
-                name="Fn (normal)",
-                line=dict(color=C["fn"], width=1.8),
-                marker=dict(color=C["fn"], size=5),
-                hovertemplate="Ch %{x}<br>Fn %{y:.3f} N",
-            ))
-
-            # Highlight selected channel
-            sel_entry = next((e for e in ft_hist if e["channel"] == sel), None)
-            if sel_entry:
-                force_fig.add_trace(go.Scatter(
-                    x=[sel], y=[sel_entry["ft_max"]],
-                    mode="markers",
-                    marker=dict(color="gold", size=14, symbol="star",
-                                line=dict(color="white", width=1.2)),
-                    name=f"Ft Ch {sel} (selected)", showlegend=False,
-                ))
-                force_fig.add_trace(go.Scatter(
-                    x=[sel], y=[sel_entry["fn_max"]],
-                    mode="markers",
-                    marker=dict(color="gold", size=14, symbol="star",
-                                line=dict(color="white", width=1.2)),
-                    name=f"Fn Ch {sel} (selected)", showlegend=False,
-                ))
-
-        # --- Ft predicted CI band anchored at last observed ---
-        ft_m  = st.get("future_ft_means",   [])
-        ft_lo = st.get("future_ft_ci_low",  [])
-        ft_hi = st.get("future_ft_ci_high", [])
-        fn_m  = st.get("future_fn_means",   [])
-        fn_lo = st.get("future_fn_ci_low",  [])
-        fn_hi = st.get("future_fn_ci_high", [])
-
-        if ft_hist and ft_m:
-            last_ch  = ft_hist[-1]["channel"]
-            fut_chs  = list(range(last_ch, last_ch + len(ft_m) + 1))
-            last_ft  = ft_hist[-1]["ft_max"]
-            last_fn  = ft_hist[-1]["fn_max"]
-
-            anch_ft_m  = [last_ft]  + list(ft_m)
-            anch_ft_lo = [last_ft]  + list(ft_lo)
-            anch_ft_hi = [last_ft]  + list(ft_hi)
-            anch_fn_m  = [last_fn]  + list(fn_m)
-            anch_fn_lo = [last_fn]  + list(fn_lo)
-            anch_fn_hi = [last_fn]  + list(fn_hi)
-
-            force_fig.add_trace(go.Scatter(
-                x=fut_chs + list(reversed(fut_chs)),
-                y=anch_ft_hi + list(reversed(anch_ft_lo)),
-                fill="toself", fillcolor=C["ft_fill"],
-                line=dict(color="rgba(0,0,0,0)"),
-                hoverinfo="skip", name="Ft 90% CI",
-            ))
-            force_fig.add_trace(go.Scatter(
-                x=fut_chs, y=anch_ft_m,
-                mode="lines",
-                line=dict(color=C["ft"], width=1.5, dash="dot"),
-                name="Ft predicted",
-            ))
-            force_fig.add_trace(go.Scatter(
-                x=fut_chs + list(reversed(fut_chs)),
-                y=anch_fn_hi + list(reversed(anch_fn_lo)),
-                fill="toself", fillcolor=C["fn_fill"],
-                line=dict(color="rgba(0,0,0,0)"),
-                hoverinfo="skip", name="Fn 90% CI",
-            ))
-            force_fig.add_trace(go.Scatter(
-                x=fut_chs, y=anch_fn_m,
-                mode="lines",
-                line=dict(color=C["fn"], width=1.5, dash="dot"),
-                name="Fn predicted",
+            spline_fig.add_trace(go.Scatter(
+                x=H_FINE, y=fn_f, mode="lines",
+                line=dict(color="rgba(26,188,156,0.10)", width=1),
+                showlegend=False, hoverinfo="skip",
             ))
 
-        force_fig.update_layout(
-            **_dark_layout("Tangential (Ft) & Normal (Fn) Force History + Prediction",
-                           yl="Force [N]")
+        # Selected channel — prominent
+        if ch is not None and ch.get("ft_ctrl"):
+            ft_ctrl = np.array(ch["ft_ctrl"], dtype=float)
+            fn_ctrl = np.array(ch["fn_ctrl"], dtype=float)
+            h_knots = np.linspace(0, 5.0, len(ft_ctrl))
+            ft_fine = _interp_spline(h_knots, ft_ctrl, H_FINE)
+            fn_fine = _interp_spline(h_knots, fn_ctrl, H_FINE)
+
+            spline_fig.add_trace(go.Scatter(
+                x=H_FINE, y=ft_fine, mode="lines",
+                name=f"Ft Ch {sel} (identified)",
+                line=dict(color=C["ft"], width=2.5),
+                hovertemplate="h %{x:.2f} µm<br>Ft %{y:.3f} N",
+            ))
+            spline_fig.add_trace(go.Scatter(
+                x=h_knots, y=ft_ctrl, mode="markers",
+                name="Ft ctrl pts",
+                marker=dict(color=C["ft"], size=7, symbol="circle",
+                            line=dict(color="white", width=0.8)),
+            ))
+            spline_fig.add_trace(go.Scatter(
+                x=H_FINE, y=fn_fine, mode="lines",
+                name=f"Fn Ch {sel} (identified)",
+                line=dict(color=C["fn"], width=2.5),
+                hovertemplate="h %{x:.2f} µm<br>Fn %{y:.3f} N",
+            ))
+            spline_fig.add_trace(go.Scatter(
+                x=h_knots, y=fn_ctrl, mode="markers",
+                name="Fn ctrl pts",
+                marker=dict(color=C["fn"], size=7, symbol="square",
+                            line=dict(color="white", width=0.8)),
+            ))
+
+            # Plateau score badge
+            plateau_score = ch.get("plateau_score", 1.0)
+            p_col = (C["REPLACE"]   if plateau_score > 1.5 else
+                     C["MID_WORN"]  if plateau_score > 1.1 else
+                     C["CONTINUE"])
+            spline_fig.add_annotation(
+                text=f"Plateau Score: {plateau_score:.3f}",
+                xref="paper", yref="paper", x=0.02, y=0.97,
+                showarrow=False,
+                font=dict(color=p_col, size=12),
+                bgcolor=C["card"], bordercolor=p_col, borderwidth=1, borderpad=4,
+            )
+
+        spline_fig.update_layout(
+            **_dark_layout(
+                f"Identified Spline Force Curves — Ch {sel}  "
+                f"(ghost = all channels, plateau → end-of-life)",
+                xl="Uncut Chip Thickness [µm]", yl="Force [N]",
+            )
         )
 
         # ==============================================================
@@ -656,7 +653,7 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
             header,
             pf_fig,
             hist_fig,
-            force_fig,
+            spline_fig,
             tool_state,  tool_state,  _badge(s_col),
             decision,    decision,    _badge(d_col),
             str(rul),
