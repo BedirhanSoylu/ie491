@@ -126,16 +126,16 @@ class MatlabBridge:
                        fresh_img_path: str) -> dict:
         if self._eng is None:
             raise RuntimeError("MATLAB engine unavailable")
-        out = self._eng.agent_worn_area(worn_img_path, fresh_img_path, nargout=3)
-        keys = ["edge_radius_px", "tool_length_px", "worn_area_px"]
+        out = self._eng.agent_worn_area(worn_img_path, fresh_img_path, nargout=4)
+        keys = ["edge_radius_px", "tool_length_px", "worn_area_px", "ideal_worn_area_px"]
         return {k: self._matlab_to_python(v) for k, v in zip(keys, out)}
 
     def call_analyze_single_image(self, img_path: str) -> dict:
         """Call analyzeSingleToolImage.m — fresh reference is hardcoded inside."""
         if self._eng is None:
             raise RuntimeError("MATLAB engine unavailable")
-        out = self._eng.analyzeSingleToolImage(img_path, nargout=3)
-        keys = ["edge_radius_px", "tool_length_px", "worn_area_px"]
+        out = self._eng.analyzeSingleToolImage(img_path, nargout=4)
+        keys = ["edge_radius_px", "tool_length_px", "worn_area_px", "ideal_worn_area_px"]
         return {k: self._matlab_to_python(v) for k, v in zip(keys, out)}
 
     def stop(self) -> None:

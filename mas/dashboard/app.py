@@ -599,11 +599,12 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
             km_col   = C.get(km_lbl, "#888")
 
             # Primary KPIs requested: channel, edge radius, tool length, worn area
-            edge_r     = analysis.get("edge_radius_px", float("nan"))
-            tool_len   = analysis.get("tool_length_px", float("nan"))
-            worn_area  = analysis.get("worn_area_px",   float("nan"))
-            tool_rad   = analysis.get("tool_radius_px", float("nan"))
-            corner_rad = analysis.get("corner_radius_px", float("nan"))
+            edge_r       = analysis.get("edge_radius_px",    float("nan"))
+            tool_len     = analysis.get("tool_length_px",    float("nan"))
+            worn_area    = analysis.get("worn_area_px",      float("nan"))
+            ideal_area   = analysis.get("ideal_worn_area_px", float("nan"))
+            tool_rad     = analysis.get("tool_radius_px",    float("nan"))
+            corner_rad   = analysis.get("corner_radius_px",  float("nan"))
 
             dec_label = ch.get("decision", "CONTINUE")
             dec_col   = C.get(dec_label, "#aaa")
@@ -644,6 +645,8 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                     html.Div([
                         # Primary KPIs first
                         _metric_row("Channel",      str(sel)),
+                        _metric_row("Ideal Worn Area",
+                                    f"{ideal_area:.1f} px²" if not _nan(ideal_area) else "N/A"),
                         _metric_row("Worn Area",
                                     f"{worn_area:.0f} px" if not _nan(worn_area) else "N/A"),
                         _metric_row("Edge Radius",

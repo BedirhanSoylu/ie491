@@ -35,11 +35,12 @@ _TESTDATA  = os.path.join(_PROJECT_ROOT, "TestData")
 _FRESH_IMG = os.path.join(_TESTDATA, "Fresh_Unworn", "tltest0102032026_110457 AM.jpg")
 
 _NAN_FEATURES = {
-    "edge_radius_px":   float("nan"),
-    "tool_length_px":   float("nan"),
-    "worn_area_px":     float("nan"),
-    "tool_radius_px":   float("nan"),
-    "corner_radius_px": float("nan"),
+    "edge_radius_px":      float("nan"),
+    "tool_length_px":      float("nan"),
+    "worn_area_px":        float("nan"),
+    "ideal_worn_area_px":  float("nan"),
+    "tool_radius_px":      float("nan"),
+    "corner_radius_px":    float("nan"),
 }
 
 _EXCEL_CACHE: list | None = None   # None = not yet loaded; list of row-dicts once loaded
@@ -172,12 +173,18 @@ class GeometryAgent(BaseAgent):
             except Exception:
                 return float("nan")
 
+        import math as _m
+        from mas.agents.image.ideal_wear_agent import compute_ideal_worn_area as _ideal
+        edge_r     = _safe(r.get("EdgeRadius"))
+        ideal_raw  = _safe(r.get("IdealWornArea"))
+        ideal_v    = ideal_raw if _m.isfinite(ideal_raw) else _ideal(edge_r)
         return {
-            "edge_radius_px":   _safe(r.get("EdgeRadius")),
-            "tool_length_px":   _safe(r.get("ToolLength")),
-            "worn_area_px":     _safe(r.get("WornArea")),
-            "tool_radius_px":   float("nan"),
-            "corner_radius_px": float("nan"),
+            "edge_radius_px":     edge_r,
+            "tool_length_px":     _safe(r.get("ToolLength")),
+            "worn_area_px":       _safe(r.get("WornArea")),
+            "ideal_worn_area_px": ideal_v,
+            "tool_radius_px":     float("nan"),
+            "corner_radius_px":   float("nan"),
         }
 
     def load_channel_image(self, channel: int) -> tuple[dict, str]:
@@ -326,12 +333,14 @@ class GeometryAgent(BaseAgent):
         else:
             edge_radius = corner_radius
 
+        from mas.agents.image.ideal_wear_agent import compute_ideal_worn_area as _ideal
         features = {
-            "edge_radius_px":   edge_radius,
-            "tool_length_px":   tool_length,
-            "worn_area_px":     worn_area,
-            "tool_radius_px":   tool_radius,
-            "corner_radius_px": corner_radius,
+            "edge_radius_px":     edge_radius,
+            "tool_length_px":     tool_length,
+            "worn_area_px":       worn_area,
+            "ideal_worn_area_px": _ideal(edge_radius),
+            "tool_radius_px":     tool_radius,
+            "corner_radius_px":   corner_radius,
         }
 
         # ---- Build annotated display image ----

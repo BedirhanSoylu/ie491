@@ -220,14 +220,14 @@ def background_loop(
                 if img_b64:
                     img_analysis = img_features
                     if decision in ("TAKE_IMAGE", "REPLACE") and MatlabBridge.get().available:
-                        edge_r    = img_features.get("edge_radius_px", float("nan"))
-                        tool_len  = img_features.get("tool_length_px", float("nan"))
-                        worn_area = img_features.get("worn_area_px",   float("nan"))
-                        if all(math.isfinite(v) for v in [edge_r, tool_len, worn_area]):
-                            kmeans_label = classifier.predict(edge_r, tool_len, worn_area)
+                        edge_r       = img_features.get("edge_radius_px",    float("nan"))
+                        tool_len     = img_features.get("tool_length_px",    float("nan"))
+                        ideal_area   = img_features.get("ideal_worn_area_px", float("nan"))
+                        if all(math.isfinite(v) for v in [edge_r, tool_len, ideal_area]):
+                            kmeans_label = classifier.predict(edge_r, tool_len, ideal_area)
                             leader.incorporate_image_truth(kmeans_label)
                             print(f"  K-Means={kmeans_label}  "
-                                  f"worn={worn_area:.0f}px  edge_r={edge_r:.1f}px")
+                                  f"ideal_area={ideal_area:.1f}px^2  edge_r={edge_r:.1f}px")
                         else:
                             print("  Image KPIs NaN — K-Means skipped")
             except Exception as exc:

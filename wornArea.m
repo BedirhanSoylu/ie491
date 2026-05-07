@@ -34,12 +34,16 @@ function wornArea()
     
     folderList = dir(baseDir);
 
+    % Ideal worn area constant: r^2 * (cos^3(40)/sin(40) + sin(40)*cos(40) - 5*pi/18)
+    IDEAL_AREA_CONST = cosd(40)^3/sind(40) + sind(40)*cosd(40) - 5*pi/18;
+
     % Veri seti için dizileri kesin veri tipleriyle başlatıyoruz
     FileNames = {};                 % Metinler (String/Char) için Cell Array
     Channels = zeros(0, 1);         % Sayılar (Double) için sayısal dizi
     EdgeRadiuses = zeros(0, 1);     % Sayılar (Double) için sayısal dizi (Ortalama Yarıçap)
     ToolLengths = zeros(0, 1);      % Sayılar (Double) için sayısal dizi
     WornAreas = zeros(0, 1);        % Sayılar (Double) için sayısal dizi
+    IdealWornAreas = zeros(0, 1);   % Sayılar (Double) — geometric ideal worn area (px^2)
     
     fprintf('Otomatik özellik çıkarımı ve görselleştirme başlatılıyor...\n');
     
@@ -111,14 +115,22 @@ function wornArea()
                     R_L = NaN; R_R = NaN;
                 end
                 
-                % --- 6. GÜVENLİ VERİ KAYDEDİCİ ---
+                % --- 6. Ideal Worn Area ---
+                if ~isnan(current_edge_radius) && current_edge_radius > 0
+                    ideal_worn_area = current_edge_radius^2 * IDEAL_AREA_CONST;
+                else
+                    ideal_worn_area = NaN;
+                end
+
+                % --- 7. GÜVENLİ VERİ KAYDEDİCİ ---
                 FileNames{idx, 1} = imgName;
                 Channels(idx, 1) = channelNum;
-                EdgeRadiuses(idx, 1) = current_edge_radius; 
+                EdgeRadiuses(idx, 1) = current_edge_radius;
                 ToolLengths(idx, 1) = tool_length(1);
                 WornAreas(idx, 1) = worn_pixels_count(1);
+                IdealWornAreas(idx, 1) = ideal_worn_area;
                 
-                % --- 7. Görselleştirme ---
+                % --- 8. Görselleştirme ---
                 fig = figure('Visible', 'off'); 
                 imshow(img_worn); hold on;
                 
@@ -158,7 +170,7 @@ function wornArea()
                     plot(xc_R, yc_R, 'g+', 'MarkerSize', 10, 'LineWidth', 2);
                 end
                 
-                title(sprintf('Kanal: %d | Worn Area: %d px | Avg R: %.1f px', channelNum, worn_pixels_count, current_edge_radius), 'Interpreter', 'none');
+                title(sprintf('Kanal: %d | Worn Area: %d px | Ideal Area: %.1f px^2 | Avg R: %.1f px', channelNum, worn_pixels_count, ideal_worn_area, current_edge_radius), 'Interpreter', 'none');
                 hold off;
                 
                 saveName = fullfile(outputDir, sprintf('Kanal%d_%s', channelNum, imgName));
@@ -169,9 +181,9 @@ function wornArea()
         end
     end
     
-    % --- 8. Tablo Oluşturma ve Excel ---
-    datasetTable = table(FileNames, Channels, EdgeRadiuses, ToolLengths, WornAreas,...
-        'VariableNames', {'FileName', 'Channel', 'EdgeRadius', 'ToolLength', 'WornArea'});
+    % --- 9. Tablo Oluşturma ve Excel ---
+    datasetTable = table(FileNames, Channels, EdgeRadiuses, ToolLengths, WornAreas, IdealWornAreas,...
+        'VariableNames', {'FileName', 'Channel', 'EdgeRadius', 'ToolLength', 'WornArea', 'IdealWornArea'});
         
     excelFileName = fullfile(baseDir, 'Tool_Features_Dataset.xlsx');
     writetable(datasetTable, excelFileName);
