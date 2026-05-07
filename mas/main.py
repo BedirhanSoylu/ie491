@@ -87,7 +87,7 @@ shared_state: dict = {
 }
 state_lock = threading.Lock()
 
-_XLSX = os.path.join(_PROJECT_ROOT, "Tool_Features_Dataset.xlsx")
+_XLSX = os.path.join(_PROJECT_ROOT, "TestData", "Tool_Features_Dataset.xlsx")
 
 
 # ---------------------------------------------------------------------------

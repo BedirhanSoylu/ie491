@@ -15,7 +15,7 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_DEFAULT_XLSX = os.path.join(_PROJECT_ROOT, "Tool_Features_Dataset.xlsx")
+_DEFAULT_XLSX = os.path.join(_PROJECT_ROOT, "TestData", "Tool_Features_Dataset.xlsx")
 
 LABELS = ["FACTORY_NEW", "MID_WORN", "CRITICAL"]
 FEATURES = ["EdgeRadius", "ToolLength", "IdealWornArea"]
