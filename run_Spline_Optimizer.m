@@ -21,7 +21,7 @@ dtool15=load('hardstavaxtool15datalong.txt');
 %AA = dtool15(15705:16534,11:12);
 %AA = dtool15(28222:29054,13:14);
 %AA = dtool15(26201:27024,15:16);
-AA = dtool15(15596:16423,17:18);
+AA = dtool15(15596:16423,1:18);
 
 steps = 828;
 experimental_data = AA(1:steps, :);

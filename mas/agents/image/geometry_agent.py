@@ -333,13 +333,8 @@ class GeometryAgent(BaseAgent):
         else:
             edge_radius = corner_radius
 
-        from mas.agents.image.ideal_wear_agent import (
-            compute_ideal_worn_area_from_mask as _ideal_mask,
-            compute_ideal_worn_area as _ideal_r,
-        )
-        ideal_area = _ideal_mask(tool_body)
-        if not (ideal_area == ideal_area):   # NaN fallback
-            ideal_area = _ideal_r(edge_radius)
+        from mas.agents.image.ideal_wear_agent import compute_ideal_worn_area as _ideal_r
+        ideal_area = _ideal_r(edge_radius)
         features = {
             "edge_radius_px":     edge_radius,
             "tool_length_px":     tool_length,
