@@ -222,16 +222,20 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         State("ch-slider", "value"),
     )
     def _auto_follow_slider(_, current_val: int) -> int:
+        from dash.exceptions import PreventUpdate
         with state_lock:
             latest = shared_state.get("current_channel", 0)
         if latest == 0:
             return current_val
-        # Follow if near the latest (within 5 ch lag) OR at the initial default (1)
-        near_end     = current_val >= latest - 5
-        at_default   = current_val <= 1
+        # Once streaming is done, stop controlling the slider so user can browse freely
+        if latest >= 45:
+            raise PreventUpdate
+        # While streaming: follow if near the latest (within 5 ch lag) OR at initial default
+        near_end   = current_val >= latest - 5
+        at_default = current_val <= 1
         if near_end or at_default:
             return max(1, latest)
-        return current_val
+        raise PreventUpdate
 
     @app.callback(
         [

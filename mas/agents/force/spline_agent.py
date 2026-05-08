@@ -92,13 +92,17 @@ class SplineAgent(BaseAgent):
     @staticmethod
     def _python_fallback(Fx: np.ndarray, Fy: np.ndarray) -> dict:
         """
-        Identify Ft(h) and Fn(h) in the chip-thickness domain via NNLS.
-        Control points are in N/mm (specific force), x-axis is 0-5 µm.
-        Plateau score mirrors agent_spline.m: end_slope / start_slope > 1
-        signals the rapid post-plateau force rise at end-of-life.
+        Identify Ft(h) and Fn(h) in the chip-thickness domain.
+
+        Matches computeResiduals_Spline.m exactly:
+          - PCHIP interpolation for force evaluation (not linear)
+          - Warm-started from a fast NNLS linear solve
+          - Nonlinear least_squares (TRF) refines control points with PCHIP
+            residuals, producing the same plateau/spike shapes as MATLAB
         """
         try:
-            from scipy.optimize import nnls  # type: ignore
+            from scipy.optimize import nnls, least_squares  # type: ignore
+            from scipy.interpolate import PchipInterpolator  # type: ignore
         except ImportError:
             return SplineAgent._linear_fallback(Fx, Fy)
 
@@ -109,30 +113,49 @@ class SplineAgent(BaseAgent):
 
         h_knots = np.linspace(0, _HMAX, n_ctrl)
         hc, phi, mask = _build_kinematics(steps)
+
+        # --- Step 1: NNLS warm-start (linear basis, fast) ---
         M = _build_obs_matrix(hc, phi, mask, h_knots, n_ctrl)
         rhs = np.concatenate([Fx_s[mask], Fy_s[mask]])
-
-        # Tikhonov smoothness regularisation: penalise large differences
-        # between adjacent control points so the identified curves are smooth.
-        # lambda chosen to balance data fit vs smoothness.
         LAMBDA = 3.0
-        D = np.diff(np.eye(n_ctrl), axis=0)          # (n_ctrl-1) × n_ctrl
+        D = np.diff(np.eye(n_ctrl), axis=0)
         Z = np.zeros_like(D)
-        D_full = np.block([[D, Z], [Z, D]])           # joint Ft + Fn block
-        M_aug  = np.vstack([M,         LAMBDA * D_full])
+        D_full = np.block([[D, Z], [Z, D]])
+        M_aug   = np.vstack([M, LAMBDA * D_full])
         rhs_aug = np.concatenate([rhs, np.zeros(2 * (n_ctrl - 1))])
-
         try:
-            x_opt, rnorm = nnls(M_aug, rhs_aug)
-            ft_ctrl = x_opt[:n_ctrl]
-            fn_ctrl = x_opt[n_ctrl:]
-            m = int(mask.sum())
-            rmse = float(np.linalg.norm(M[:2*m] @ x_opt - rhs) /
-                         np.sqrt(max(2 * m, 1)))
+            x0, _ = nnls(M_aug, rhs_aug)
         except Exception:
-            ft_ctrl = np.linspace(0, 36, n_ctrl)
-            fn_ctrl = np.linspace(0, 22, n_ctrl)
-            rmse = float("nan")
+            x0 = np.concatenate([np.linspace(0, 36, n_ctrl),
+                                  np.linspace(0, 22, n_ctrl)])
+
+        # --- Step 2: PCHIP nonlinear refinement (matches MATLAB lsqnonlin) ---
+        cos_phi = np.cos(phi)
+        sin_phi = np.sin(phi)
+
+        def _residuals_pchip(params: np.ndarray) -> np.ndarray:
+            ft_hc = PchipInterpolator(h_knots, params[:n_ctrl])(hc)
+            fn_hc = PchipInterpolator(h_knots, params[n_ctrl:])(hc)
+            Fx_pred = _B * (ft_hc * cos_phi + fn_hc * sin_phi)
+            Fy_pred = _B * (ft_hc * sin_phi - fn_hc * cos_phi)
+            return np.concatenate([Fx_pred[mask] - Fx_s[mask],
+                                   Fy_pred[mask] - Fy_s[mask]])
+
+        lb = np.zeros(2 * n_ctrl)
+        ub = np.full(2 * n_ctrl, 200.0)
+        try:
+            result  = least_squares(_residuals_pchip, x0, bounds=(lb, ub),
+                                    method="trf", max_nfev=500,
+                                    xtol=1e-8, ftol=1e-8, gtol=1e-8)
+            x_opt   = result.x
+            res_vec = result.fun
+            rmse    = float(np.sqrt(np.mean(res_vec ** 2)))
+        except Exception:
+            x_opt = x0
+            rmse  = float("nan")
+
+        ft_ctrl = x_opt[:n_ctrl]
+        fn_ctrl = x_opt[n_ctrl:]
 
         ft_max = float(np.max(ft_ctrl))
         fn_max = float(np.max(fn_ctrl))
