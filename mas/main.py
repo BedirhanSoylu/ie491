@@ -84,6 +84,10 @@ shared_state: dict = {
     "kmeans_result":     "-",
     # Decision log (table rows)
     "decision_log":      [],
+    # Reference spline gallery: middle 828-pt window from each of the 9 col pairs.
+    # Channel 5k+3 is the middle window of col pair k (k=0..8).
+    "reference_channels":   [3, 8, 13, 18, 23, 28, 33, 38, 43],
+    "take_image_channels":  [],   # channels where TAKE_IMAGE or REPLACE fired
 }
 state_lock = threading.Lock()
 
@@ -336,6 +340,9 @@ def background_loop(
             shared_state["future_fn_means"]   = fn_traj_m.tolist()
             shared_state["future_fn_ci_low"]  = fn_traj_lo.tolist()
             shared_state["future_fn_ci_high"] = fn_traj_hi.tolist()
+
+            if decision in ("TAKE_IMAGE", "REPLACE"):
+                shared_state["take_image_channels"].append(channel)
 
             shared_state["observations"].append({
                 "channel":  channel,

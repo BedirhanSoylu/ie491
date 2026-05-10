@@ -175,6 +175,13 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                 style=dict(marginBottom="16px"),
             ),
 
+            # ---- Row 2b: Reference Splines Gallery ----
+            html.Div(
+                dcc.Graph(id="ref-spline-chart", style=dict(height="380px"),
+                          config=dict(displayModeBar=False)),
+                style=dict(marginBottom="16px"),
+            ),
+
             # ---- Row 3: Image panel ----
             html.Div(id="image-panel", children=[]),
 
@@ -254,6 +261,7 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
             Output("kmeans-val",       "children"),
             Output("kmeans-badge",     "children"),
             Output("kmeans-badge",     "style"),
+            Output("ref-spline-chart",  "figure"),
             Output("image-panel",      "children"),
             Output("decision-log",     "data"),
         ],
@@ -686,6 +694,84 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
             ], style=_CARD)]
 
         # ==============================================================
+        # Reference Spline Gallery
+        # 9 col-pair reference channels (middle 828-pt window each).
+        # Channel 5k+3 is the middle window of col pair k (k=0..8).
+        # TAKE_IMAGE events are highlighted with thick lines + stars.
+        # ==============================================================
+        _REF_PALETTE = [
+            "#3498db", "#2471a3", "#1e8449", "#27ae60",
+            "#f39c12", "#e67e22", "#d35400", "#e74c3c", "#922b21",
+        ]
+        _REF_CHANNELS = st.get("reference_channels", [3, 8, 13, 18, 23, 28, 33, 38, 43])
+        _TI_CHANNELS  = st.get("take_image_channels", [])
+        # col pairs that had a TAKE_IMAGE / REPLACE event
+        _TI_PAIRS     = {(ch - 1) // 5 for ch in _TI_CHANNELS}
+
+        ref_fig = go.Figure()
+        h_knots_ref = np.linspace(0, 5.0, 16)   # matches _N_CTRL, displayed in µm
+        H_REF       = np.linspace(0, 5.0, 300)
+
+        for pair_idx, ref_ch in enumerate(_REF_CHANNELS):
+            rch_data = hist.get(ref_ch)
+            if rch_data is None:
+                continue
+
+            ft_c = rch_data.get("ft_ctrl", [])
+            fn_c = rch_data.get("fn_ctrl", [])
+            if not ft_c:
+                continue
+
+            color     = _REF_PALETTE[pair_idx % len(_REF_PALETTE)]
+            is_ti     = pair_idx in _TI_PAIRS
+            lw_ft     = 3.5 if is_ti else 1.8
+            lw_fn     = 2.5 if is_ti else 1.2
+            opacity   = 1.0 if is_ti else 0.65
+            label     = f"Pair {pair_idx+1} (Ch {ref_ch})"
+            if is_ti:
+                label += " ★ TAKE_IMAGE"
+
+            ft_fine = _interp_spline(h_knots_ref, ft_c, H_REF)
+            fn_fine = _interp_spline(h_knots_ref, fn_c, H_REF)
+
+            ref_fig.add_trace(go.Scatter(
+                x=H_REF, y=ft_fine, mode="lines", name=label,
+                line=dict(color=color, width=lw_ft),
+                opacity=opacity,
+                hovertemplate=f"Pair {pair_idx+1} Ft: h %{{x:.2f}} µm → %{{y:.1f}} N/mm",
+            ))
+            ref_fig.add_trace(go.Scatter(
+                x=H_REF, y=fn_fine, mode="lines",
+                name=f"Pair {pair_idx+1} Fn",
+                line=dict(color=color, width=lw_fn, dash="dot"),
+                opacity=opacity * 0.8,
+                showlegend=False,
+                hovertemplate=f"Pair {pair_idx+1} Fn: h %{{x:.2f}} µm → %{{y:.1f}} N/mm",
+            ))
+
+            # Star at the transition point (edge radius annotation)
+            er = rch_data.get("edge_radius_from_spline")
+            if er and not _nan(er):
+                h_star = float(er) / 4.0   # µm (r_e/4 = h*)
+                if 0 < h_star < 5.0:
+                    ft_star = _interp_spline(h_knots_ref, ft_c, np.array([h_star]))[0]
+                    ref_fig.add_trace(go.Scatter(
+                        x=[h_star], y=[ft_star], mode="markers",
+                        marker=dict(color=color, size=9, symbol="diamond",
+                                    line=dict(color="white", width=1)),
+                        name=f"r_e={float(er):.1f}µm",
+                        hovertemplate=f"Pair {pair_idx+1}<br>h*={h_star:.2f}µm<br>r_e={float(er):.1f}µm",
+                    ))
+
+        ref_fig.update_layout(
+            **_dark_layout(
+                "Reference Spline Gallery — 9 Col-Pair 828-pt Windows  "
+                "| Ft solid · Fn dotted · ◆ = h* = r_e/4 · ★ = TAKE_IMAGE triggered",
+                xl="Uncut Chip Thickness [µm]", yl="Specific Force [N/mm]",
+            )
+        )
+
+        # ==============================================================
         # Decision log
         # ==============================================================
         log      = st.get("decision_log", [])
@@ -708,6 +794,7 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
             str(rul),
             f"{crit_p*100:.1f}%",
             kmeans,      kmeans,      _badge(km_col),
+            ref_fig,
             image_panel,
             log_data,
         )
