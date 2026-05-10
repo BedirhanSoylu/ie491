@@ -175,13 +175,6 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                 style=dict(marginBottom="16px"),
             ),
 
-            # ---- Row 2b: Reference Splines Gallery ----
-            html.Div(
-                dcc.Graph(id="ref-spline-chart", style=dict(height="380px"),
-                          config=dict(displayModeBar=False)),
-                style=dict(marginBottom="16px"),
-            ),
-
             # ---- Row 3: Image panel ----
             html.Div(id="image-panel", children=[]),
 
@@ -261,7 +254,6 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
             Output("kmeans-val",       "children"),
             Output("kmeans-badge",     "children"),
             Output("kmeans-badge",     "style"),
-            Output("ref-spline-chart",  "figure"),
             Output("image-panel",      "children"),
             Output("decision-log",     "data"),
         ],
@@ -476,9 +468,12 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
         hist_fig.update_xaxes(range=[0.0, 1.0])
 
         # ==============================================================
-        # Identified Spline Force Curves (run_Spline_Optimizer style)
-        # Ghost traces for all processed channels; selected channel prominent.
-        # Plateau → rapid rise after flat region signals end-of-life.
+        # Reference Spline Gallery
+        # Shows col-pair reference curves progressively as the user
+        # scrolls through channels.  Only pairs 0..current_pair are drawn;
+        # the current pair is prominent and previous pairs are ghost traces.
+        # TAKE_IMAGE / REPLACE pairs get a slightly brighter ghost + ★ label.
+        # ◆ diamond marks h* = r_e/4 on each visible Ft curve.
         # ==============================================================
         spline_fig = go.Figure()
 
@@ -488,107 +483,101 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                 return _Pchip(h_k, ctrl)(h_f)
             return np.interp(h_f, h_k, ctrl)
 
-        H_FINE = np.linspace(0, 5.0, 200)   # chip thickness axis [µm]
+        H_FINE = np.linspace(0, 5.0, 300)
 
-        # Ghost traces — all channels except selected
-        ghost_chs = sorted(k for k in hist if k != sel and hist[k].get("ft_ctrl"))
-        for g_ch in ghost_chs:
-            g = hist[g_ch]
-            ft_c = np.array(g["ft_ctrl"], dtype=float)
-            fn_c = np.array(g["fn_ctrl"], dtype=float)
+        _REF_PALETTE = [
+            "#3498db", "#2471a3", "#27ae60", "#1e8449",
+            "#f39c12", "#e67e22", "#d35400", "#e74c3c", "#922b21",
+        ]
+
+        _REF_CHANNELS = st.get("reference_channels", [3, 8, 13, 18, 23, 28, 33, 38, 43])
+        _TI_CHS       = st.get("take_image_channels", [])
+        _TI_PAIRS     = {(c - 1) // 5 for c in _TI_CHS}
+        current_pair  = (sel - 1) // 5   # 0-indexed col pair for selected channel
+
+        for pair_idx, ref_ch in enumerate(_REF_CHANNELS):
+            if pair_idx > current_pair:
+                continue                  # not revealed yet
+
+            rch = hist.get(ref_ch)
+            if rch is None or not rch.get("ft_ctrl"):
+                continue
+
+            is_current = (pair_idx == current_pair)
+            is_ti      = pair_idx in _TI_PAIRS
+            color      = _REF_PALETTE[pair_idx % len(_REF_PALETTE)]
+
+            if is_current:
+                opacity = 1.0;  lw_ft = 2.8;  lw_fn = 1.6
+            elif is_ti:
+                opacity = 0.60; lw_ft = 1.6;  lw_fn = 1.0
+            else:
+                opacity = 0.22; lw_ft = 1.0;  lw_fn = 0.8
+
+            label = f"Pair {pair_idx + 1}  Ch {ref_ch}"
+            if is_current:
+                label += "  ← selected"
+            if is_ti:
+                label += "  ★"
+
+            ft_c = np.array(rch["ft_ctrl"], dtype=float)
+            fn_c = np.array(rch["fn_ctrl"], dtype=float)
             h_k  = np.linspace(0, 5.0, len(ft_c))
             ft_f = _interp_spline(h_k, ft_c, H_FINE)
             fn_f = _interp_spline(h_k, fn_c, H_FINE)
+
             spline_fig.add_trace(go.Scatter(
-                x=H_FINE, y=ft_f, mode="lines",
-                line=dict(color="rgba(155,89,182,0.10)", width=1),
-                showlegend=False, hoverinfo="skip",
+                x=H_FINE, y=ft_f, mode="lines", name=label,
+                line=dict(color=color, width=lw_ft), opacity=opacity,
+                showlegend=True,
+                hovertemplate=f"Pair {pair_idx+1} Ft: h %{{x:.2f}} µm → %{{y:.2f}} N/mm",
             ))
             spline_fig.add_trace(go.Scatter(
                 x=H_FINE, y=fn_f, mode="lines",
-                line=dict(color="rgba(26,188,156,0.10)", width=1),
-                showlegend=False, hoverinfo="skip",
+                line=dict(color=color, width=lw_fn, dash="dot"),
+                opacity=opacity * 0.75,
+                showlegend=False,
+                hovertemplate=f"Pair {pair_idx+1} Fn: h %{{x:.2f}} µm → %{{y:.2f}} N/mm",
             ))
 
-        # Selected channel — prominent
-        if ch is not None and ch.get("ft_ctrl"):
-            ft_ctrl = np.array(ch["ft_ctrl"], dtype=float)
-            fn_ctrl = np.array(ch["fn_ctrl"], dtype=float)
-            h_knots = np.linspace(0, 5.0, len(ft_ctrl))
-            ft_fine = _interp_spline(h_knots, ft_ctrl, H_FINE)
-            fn_fine = _interp_spline(h_knots, fn_ctrl, H_FINE)
-
-            spline_fig.add_trace(go.Scatter(
-                x=H_FINE, y=ft_fine, mode="lines",
-                name=f"Ft Ch {sel} (identified)",
-                line=dict(color=C["ft"], width=2.5),
-                hovertemplate="h %{x:.2f} µm<br>Ft %{y:.3f} N",
-            ))
-            spline_fig.add_trace(go.Scatter(
-                x=h_knots, y=ft_ctrl, mode="markers",
-                name="Ft ctrl pts",
-                marker=dict(color=C["ft"], size=7, symbol="circle",
-                            line=dict(color="white", width=0.8)),
-            ))
-            spline_fig.add_trace(go.Scatter(
-                x=H_FINE, y=fn_fine, mode="lines",
-                name=f"Fn Ch {sel} (identified)",
-                line=dict(color=C["fn"], width=2.5),
-                hovertemplate="h %{x:.2f} µm<br>Fn %{y:.3f} N",
-            ))
-            spline_fig.add_trace(go.Scatter(
-                x=h_knots, y=fn_ctrl, mode="markers",
-                name="Fn ctrl pts",
-                marker=dict(color=C["fn"], size=7, symbol="square",
-                            line=dict(color="white", width=0.8)),
-            ))
-
-            # Prediction curves: scale current spline by PF wear projection
-            # ft_slope / fn_slope match particle_filter.py force_trajectory
-            FT_SLOPE = 1.5
-            FN_SLOPE = 2.0
-            future_means  = ch.get("future_means", [])
-            current_wear  = ch.get("pf_mean", 0.0)
-
-            pred_steps  = [4, 9, 14]   # +5, +10, +15 channels ahead
-            pred_alphas = [0.55, 0.35, 0.20]
-
-            for step_i, alpha in zip(pred_steps, pred_alphas):
-                if step_i >= len(future_means):
-                    continue
-                delta    = max(0.0, float(future_means[step_i]) - current_wear)
-                ft_pred  = ft_ctrl * (1.0 + FT_SLOPE * delta)
-                fn_pred  = fn_ctrl * (1.0 + FN_SLOPE * delta)
-                ft_pf    = _interp_spline(h_knots, ft_pred, H_FINE)
-                fn_pf    = _interp_spline(h_knots, fn_pred, H_FINE)
-                label    = f"+{step_i + 1} ch"
-
+            # Control points only on the current pair
+            if is_current:
                 spline_fig.add_trace(go.Scatter(
-                    x=H_FINE, y=ft_pf, mode="lines",
-                    name=f"Ft pred {label}",
-                    line=dict(color=f"rgba(155,89,182,{alpha})",
-                              width=1.5, dash="dot"),
-                    hovertemplate=f"Pred {label}: h %{{x:.2f}} µm<br>Ft %{{y:.2f}} N/mm",
-                ))
-                spline_fig.add_trace(go.Scatter(
-                    x=H_FINE, y=fn_pf, mode="lines",
-                    name=f"Fn pred {label}",
-                    line=dict(color=f"rgba(26,188,156,{alpha})",
-                              width=1.5, dash="dot"),
-                    hovertemplate=f"Pred {label}: h %{{x:.2f}} µm<br>Fn %{{y:.2f}} N/mm",
+                    x=h_k, y=ft_c, mode="markers",
+                    marker=dict(color=color, size=7, symbol="circle",
+                                line=dict(color="white", width=0.8)),
+                    showlegend=False, hoverinfo="skip",
                 ))
 
-            # Edge radius badge (r_e = 4*h*; larger = more worn)
-            edge_r = ch.get("edge_radius_from_spline", float("nan"))
-            if isinstance(edge_r, float) and not (edge_r == edge_r):  # NaN check
-                er_text = "Edge Radius: N/A"
-                er_col  = C["CONTINUE"]
+            # Diamond at h* = r_e / 4
+            er = rch.get("edge_radius_from_spline")
+            if er is not None and not _nan(er):
+                h_star = float(er) / 4.0
+                if 0.0 < h_star < 5.0:
+                    ft_star = float(_interp_spline(h_k, ft_c, np.array([h_star]))[0])
+                    spline_fig.add_trace(go.Scatter(
+                        x=[h_star], y=[ft_star], mode="markers",
+                        marker=dict(color=color, size=11 if is_current else 7,
+                                    symbol="diamond",
+                                    line=dict(color="white", width=1.2)),
+                        opacity=opacity,
+                        showlegend=False,
+                        hovertemplate=(f"Pair {pair_idx+1}<br>"
+                                       f"h* = {h_star:.2f} µm<br>"
+                                       f"r_e = {float(er):.1f} µm"),
+                    ))
+
+        # Badge: edge radius of the currently selected channel's col pair
+        if ch is not None:
+            er = ch.get("edge_radius_from_spline")
+            if er is None or _nan(er):
+                er_text, er_col = "Edge Radius: N/A", C["CONTINUE"]
             else:
-                er_val  = float(edge_r) if edge_r is not None else float("nan")
+                er_val  = float(er)
                 er_col  = (C["REPLACE"]  if er_val > 8.0 else
                            C["MID_WORN"] if er_val > 4.0 else
                            C["CONTINUE"])
-                er_text = f"Edge Radius (spline): {er_val:.2f} µm"
+                er_text = f"r_e = {er_val:.2f} µm  (h* = {er_val/4:.2f} µm)"
             spline_fig.add_annotation(
                 text=er_text,
                 xref="paper", yref="paper", x=0.02, y=0.97,
@@ -599,8 +588,8 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
 
         spline_fig.update_layout(
             **_dark_layout(
-                f"Identified Spline Force Curves — Ch {sel}  "
-                f"| dashed = PF wear projection (+5/+10/+15 ch)",
+                f"Spline Gallery — Pairs 1–{current_pair + 1} / 9  |  "
+                f"Ch {sel} selected  |  Ft solid · Fn dotted · ◆ h* = r_e/4",
                 xl="Uncut Chip Thickness [µm]", yl="Specific Force [N/mm]",
             )
         )
@@ -694,84 +683,6 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
             ], style=_CARD)]
 
         # ==============================================================
-        # Reference Spline Gallery
-        # 9 col-pair reference channels (middle 828-pt window each).
-        # Channel 5k+3 is the middle window of col pair k (k=0..8).
-        # TAKE_IMAGE events are highlighted with thick lines + stars.
-        # ==============================================================
-        _REF_PALETTE = [
-            "#3498db", "#2471a3", "#1e8449", "#27ae60",
-            "#f39c12", "#e67e22", "#d35400", "#e74c3c", "#922b21",
-        ]
-        _REF_CHANNELS = st.get("reference_channels", [3, 8, 13, 18, 23, 28, 33, 38, 43])
-        _TI_CHANNELS  = st.get("take_image_channels", [])
-        # col pairs that had a TAKE_IMAGE / REPLACE event
-        _TI_PAIRS     = {(ch - 1) // 5 for ch in _TI_CHANNELS}
-
-        ref_fig = go.Figure()
-        h_knots_ref = np.linspace(0, 5.0, 16)   # matches _N_CTRL, displayed in µm
-        H_REF       = np.linspace(0, 5.0, 300)
-
-        for pair_idx, ref_ch in enumerate(_REF_CHANNELS):
-            rch_data = hist.get(ref_ch)
-            if rch_data is None:
-                continue
-
-            ft_c = rch_data.get("ft_ctrl", [])
-            fn_c = rch_data.get("fn_ctrl", [])
-            if not ft_c:
-                continue
-
-            color     = _REF_PALETTE[pair_idx % len(_REF_PALETTE)]
-            is_ti     = pair_idx in _TI_PAIRS
-            lw_ft     = 3.5 if is_ti else 1.8
-            lw_fn     = 2.5 if is_ti else 1.2
-            opacity   = 1.0 if is_ti else 0.65
-            label     = f"Pair {pair_idx+1} (Ch {ref_ch})"
-            if is_ti:
-                label += " ★ TAKE_IMAGE"
-
-            ft_fine = _interp_spline(h_knots_ref, ft_c, H_REF)
-            fn_fine = _interp_spline(h_knots_ref, fn_c, H_REF)
-
-            ref_fig.add_trace(go.Scatter(
-                x=H_REF, y=ft_fine, mode="lines", name=label,
-                line=dict(color=color, width=lw_ft),
-                opacity=opacity,
-                hovertemplate=f"Pair {pair_idx+1} Ft: h %{{x:.2f}} µm → %{{y:.1f}} N/mm",
-            ))
-            ref_fig.add_trace(go.Scatter(
-                x=H_REF, y=fn_fine, mode="lines",
-                name=f"Pair {pair_idx+1} Fn",
-                line=dict(color=color, width=lw_fn, dash="dot"),
-                opacity=opacity * 0.8,
-                showlegend=False,
-                hovertemplate=f"Pair {pair_idx+1} Fn: h %{{x:.2f}} µm → %{{y:.1f}} N/mm",
-            ))
-
-            # Star at the transition point (edge radius annotation)
-            er = rch_data.get("edge_radius_from_spline")
-            if er and not _nan(er):
-                h_star = float(er) / 4.0   # µm (r_e/4 = h*)
-                if 0 < h_star < 5.0:
-                    ft_star = _interp_spline(h_knots_ref, ft_c, np.array([h_star]))[0]
-                    ref_fig.add_trace(go.Scatter(
-                        x=[h_star], y=[ft_star], mode="markers",
-                        marker=dict(color=color, size=9, symbol="diamond",
-                                    line=dict(color="white", width=1)),
-                        name=f"r_e={float(er):.1f}µm",
-                        hovertemplate=f"Pair {pair_idx+1}<br>h*={h_star:.2f}µm<br>r_e={float(er):.1f}µm",
-                    ))
-
-        ref_fig.update_layout(
-            **_dark_layout(
-                "Reference Spline Gallery — 9 Col-Pair 828-pt Windows  "
-                "| Ft solid · Fn dotted · ◆ = h* = r_e/4 · ★ = TAKE_IMAGE triggered",
-                xl="Uncut Chip Thickness [µm]", yl="Specific Force [N/mm]",
-            )
-        )
-
-        # ==============================================================
         # Decision log
         # ==============================================================
         log      = st.get("decision_log", [])
@@ -794,7 +705,6 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
             str(rul),
             f"{crit_p*100:.1f}%",
             kmeans,      kmeans,      _badge(km_col),
-            ref_fig,
             image_panel,
             log_data,
         )
