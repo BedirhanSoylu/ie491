@@ -570,17 +570,23 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                     hovertemplate=f"Pred {label}: h %{{x:.2f}} µm<br>Fn %{{y:.2f}} N/mm",
                 ))
 
-            # Plateau score badge
-            plateau_score = ch.get("plateau_score", 1.0)
-            p_col = (C["REPLACE"]   if plateau_score > 1.5 else
-                     C["MID_WORN"]  if plateau_score > 1.1 else
-                     C["CONTINUE"])
+            # Edge radius badge (r_e = 4*h*; larger = more worn)
+            edge_r = ch.get("edge_radius_from_spline", float("nan"))
+            if isinstance(edge_r, float) and not (edge_r == edge_r):  # NaN check
+                er_text = "Edge Radius: N/A"
+                er_col  = C["CONTINUE"]
+            else:
+                er_val  = float(edge_r) if edge_r is not None else float("nan")
+                er_col  = (C["REPLACE"]  if er_val > 8.0 else
+                           C["MID_WORN"] if er_val > 4.0 else
+                           C["CONTINUE"])
+                er_text = f"Edge Radius (spline): {er_val:.2f} µm"
             spline_fig.add_annotation(
-                text=f"Plateau Score: {plateau_score:.3f}",
+                text=er_text,
                 xref="paper", yref="paper", x=0.02, y=0.97,
                 showarrow=False,
-                font=dict(color=p_col, size=12),
-                bgcolor=C["card"], bordercolor=p_col, borderwidth=1, borderpad=4,
+                font=dict(color=er_col, size=12),
+                bgcolor=C["card"], bordercolor=er_col, borderwidth=1, borderpad=4,
             )
 
         spline_fig.update_layout(
@@ -662,8 +668,9 @@ def create_app(shared_state: dict, state_lock: threading.Lock) -> dash.Dash:
                                     f"{tool_rad:.0f} px"  if not _nan(tool_rad)  else "N/A"),
                         _metric_row("Corner Radius",
                                     f"{corner_rad:.1f} px" if not _nan(corner_rad) else "N/A"),
-                        _metric_row("Plateau Score",
-                                    f"{ch.get('plateau_score', 0.0):.3f}"),
+                        _metric_row("Edge Radius (spline)",
+                                    f"{ch.get('edge_radius_from_spline', float('nan')):.2f} µm"
+                                    if ch.get('edge_radius_from_spline') is not None else "N/A"),
                         _metric_row("Ft (tangential)",
                                     f"{ch.get('ft_max', 0.0):.3f} N"),
                         _metric_row("Fn (normal)",

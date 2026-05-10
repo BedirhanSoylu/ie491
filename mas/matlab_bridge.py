@@ -118,7 +118,7 @@ class MatlabBridge:
             "fn_ctrl":       fn_ctrl,
             "ft_max":        self._matlab_to_python(out[2]),
             "fn_max":        self._matlab_to_python(out[3]),
-            "plateau_score": self._matlab_to_python(out[4]),
+            "edge_radius_from_spline": self._matlab_to_python(out[4]),
             "rmse":          self._matlab_to_python(out[5]),
         }
 

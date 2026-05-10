@@ -81,6 +81,41 @@ def _build_obs_matrix(hc: np.ndarray, phi: np.ndarray,
     return M
 
 
+def _find_edge_radius_from_spline(
+    h_knots: np.ndarray,
+    ft_ctrl: np.ndarray,
+    PchipInterpolator,  # passed in so the caller already has the import
+) -> float:
+    """
+    Locate h* where Ft(h) transitions from plateau to rapid increase.
+    Physical basis: h* = r_e / 4  =>  r_e = 4 * h*.
+
+    Returns edge radius in µm.  h_knots is in mm, so result = 4 * h* * 1000.
+    Returns NaN if the interpolator is unavailable.
+    """
+    n = 500
+    h_fine = np.linspace(h_knots[0], h_knots[-1], n)
+    dft = PchipInterpolator(h_knots, ft_ctrl).derivative()(h_fine)
+
+    # Skip first/last 10% to avoid boundary curvature artefacts
+    skip = max(2, n // 10)
+    dft_work = dft[skip: n - skip]
+
+    # Plateau = global minimum of slope in working region
+    plateau_local = int(np.argmin(dft_work))
+    plateau_idx   = plateau_local + skip
+
+    # Transition: slope rises 30 % of the way from plateau level to post-plateau max
+    post_dft  = dft[plateau_idx:]
+    max_slope = float(np.max(post_dft))
+    threshold = dft[plateau_idx] + (max_slope - dft[plateau_idx]) * 0.30
+
+    candidates = np.where(post_dft > threshold)[0]
+    h_star = h_fine[plateau_idx + int(candidates[0])] if len(candidates) else h_fine[plateau_idx]
+
+    return 4.0 * float(h_star) * 1000.0   # mm -> µm
+
+
 class SplineAgent(BaseAgent):
     def analyze(self, Fx: np.ndarray, Fy: np.ndarray) -> dict:
         Fx = np.asarray(Fx, dtype=np.float64)
@@ -160,21 +195,17 @@ class SplineAgent(BaseAgent):
         ft_max = float(np.max(ft_ctrl))
         fn_max = float(np.max(fn_ctrl))
 
-        # Plateau score: terminal slope / initial slope on Ft (mirrors MATLAB).
-        # Clamped to [-10, 10] — extreme values indicate poor fit, not wear.
-        end_slope   = (ft_ctrl[-1] - ft_ctrl[-3]) / 2.0
-        start_slope = (ft_ctrl[2]  - ft_ctrl[0])  / 2.0
-        plateau_score = float(np.clip(
-            end_slope / (abs(start_slope) + 1e-9), -10.0, 10.0
-        ))
+        edge_radius_um = _find_edge_radius_from_spline(
+            h_knots, ft_ctrl, PchipInterpolator
+        )
 
         return {
-            "ft_ctrl":       ft_ctrl.tolist(),
-            "fn_ctrl":       fn_ctrl.tolist(),
-            "ft_max":        ft_max,
-            "fn_max":        fn_max,
-            "plateau_score": plateau_score,
-            "rmse":          rmse,
+            "ft_ctrl":               ft_ctrl.tolist(),
+            "fn_ctrl":               fn_ctrl.tolist(),
+            "ft_max":                ft_max,
+            "fn_max":                fn_max,
+            "edge_radius_from_spline": edge_radius_um,
+            "rmse":                  rmse,
         }
 
     @staticmethod
@@ -184,10 +215,10 @@ class SplineAgent(BaseAgent):
         ft_ctrl = np.linspace(0, max(float(np.max(np.abs(Fx))), 1e-9), n_ctrl)
         fn_ctrl = np.linspace(0, max(float(np.max(np.abs(Fy))), 1e-9), n_ctrl)
         return {
-            "ft_ctrl":       ft_ctrl.tolist(),
-            "fn_ctrl":       fn_ctrl.tolist(),
-            "ft_max":        float(ft_ctrl[-1]),
-            "fn_max":        float(fn_ctrl[-1]),
-            "plateau_score": 1.0,
-            "rmse":          float("nan"),
+            "ft_ctrl":                 ft_ctrl.tolist(),
+            "fn_ctrl":                 fn_ctrl.tolist(),
+            "ft_max":                  float(ft_ctrl[-1]),
+            "fn_max":                  float(fn_ctrl[-1]),
+            "edge_radius_from_spline": float("nan"),
+            "rmse":                    float("nan"),
         }

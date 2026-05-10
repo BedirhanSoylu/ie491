@@ -3,8 +3,8 @@ Particle Filter Multi-Agent System (PF-MAS) — Entry Point.
 
 Per-channel pipeline:
   1. StreamSimulator yields Fx/Fy for each of 45 channels.
-  2. SplineAgent  → ft_ctrl, fn_ctrl, ft_max, fn_max, plateau_score.
-  3. AmplitudeAgent + ft_max + fn_max + plateau_score → fused wear signal [0,1].
+  2. SplineAgent  → ft_ctrl, fn_ctrl, ft_max, fn_max, edge_radius_from_spline.
+  3. AmplitudeAgent + ft_max + fn_max + edge_radius_from_spline → fused wear signal [0,1].
   4. LeaderAgent checks signal against Particle Filter CI (fused Ft/Fn obs):
        Outside CI          → TAKE_IMAGE
        crit_prob > 90 %    → REPLACE
@@ -98,7 +98,7 @@ def _compute_wear_signal(
     Fx: np.ndarray,
     Fy: np.ndarray,
     amp_agent: AmplitudeZeroPointAgent,
-    plateau_score: float,
+    edge_radius_from_spline: float,
     norm: dict,
     ft_max: float = 0.0,
     fn_max: float = 0.0,
@@ -106,7 +106,10 @@ def _compute_wear_signal(
     """
     Returns (signal, mean_amp, runout, ft_norm, fn_norm).
     signal is the fused wear indicator normalised to [0.02, 1.0].
-    ft_norm and fn_norm are in [0, 1] relative to running max.
+    ft_norm, fn_norm, and edge_r_norm are in [0, 1] relative to running max.
+
+    edge_radius_from_spline: r_e in µm derived from spline plateau transition
+      (h* = r_e/4 — larger r_e means more worn tool).
     """
     def _safe(v, default: float = 0.0) -> float:
         try:
@@ -125,21 +128,25 @@ def _compute_wear_signal(
         mean_amp = float(np.mean(np.abs(Fx)))
         runout   = 0.0
 
-    # Running-max normalisation for Ft and Fn
+    # Running-max normalisation for Ft, Fn, and edge radius
     if ft_max > norm["ft_max"]:
         norm["ft_max"] = ft_max
     if fn_max > norm["fn_max"]:
         norm["fn_max"] = fn_max
+    edge_r = _safe(edge_radius_from_spline)
+    if edge_r > norm["edge_r_max"]:
+        norm["edge_r_max"] = edge_r
 
-    ft_norm = float(np.clip(ft_max / (norm["ft_max"] + 1e-9), 0.0, 1.0))
-    fn_norm = float(np.clip(fn_max / (norm["fn_max"] + 1e-9), 0.0, 1.0))
+    ft_norm    = float(np.clip(ft_max / (norm["ft_max"]    + 1e-9), 0.0, 1.0))
+    fn_norm    = float(np.clip(fn_max / (norm["fn_max"]    + 1e-9), 0.0, 1.0))
+    edge_r_norm = float(np.clip(edge_r / (norm["edge_r_max"] + 1e-9), 0.0, 1.0))
 
-    plateau_contrib = max(0.0, (plateau_score - 1.0)) * mean_amp * 0.25
-    raw = (0.50 * mean_amp
+    # Larger edge radius = more worn tool, contributes directly to wear signal
+    raw = (0.45 * mean_amp
            + 0.20 * runout
            + 0.15 * ft_norm
            + 0.10 * fn_norm
-           + 0.05 * plateau_contrib)
+           + 0.10 * edge_r_norm)
 
     if raw > norm["max"]:
         norm["max"] = raw
@@ -162,7 +169,7 @@ def background_loop(
 ) -> None:
 
     sim       = StreamSimulator(stream_delay=0.4)
-    norm      = {"max": 8.0, "ft_max": 0.01, "fn_max": 0.01}
+    norm      = {"max": 8.0, "ft_max": 0.01, "fn_max": 0.01, "edge_r_max": 1.0}
     dry_count = 0
 
     for ch_data in sim.stream():
@@ -178,22 +185,23 @@ def background_loop(
 
         print(f"\n[Ch {channel:02d} / 45]", end="  ")
 
-        # 1. Spline analysis → Ft/Fn + plateau_score
+        # 1. Spline analysis → Ft/Fn + edge_radius_from_spline
         try:
             sp           = spline_agent.analyze(Fx, Fy)
             ft_ctrl      = [float(x) for x in sp.get("ft_ctrl", [])]
             fn_ctrl      = [float(x) for x in sp.get("fn_ctrl", [])]
-            ft_max       = float(sp.get("ft_max",       0.0))
-            fn_max       = float(sp.get("fn_max",       0.0))
-            plateau_score = float(sp.get("plateau_score", 1.0) or 1.0)
+            ft_max       = float(sp.get("ft_max", 0.0))
+            fn_max       = float(sp.get("fn_max", 0.0))
+            edge_radius_from_spline = sp.get("edge_radius_from_spline", float("nan"))
         except Exception as exc:
             print(f"SplineAgent: {exc}", end="  ")
             ft_ctrl = fn_ctrl = []
-            ft_max = fn_max = plateau_score = 0.0
+            ft_max = fn_max = 0.0
+            edge_radius_from_spline = float("nan")
 
-        # 2. Fused wear signal (incorporates Ft and Fn)
+        # 2. Fused wear signal (incorporates Ft, Fn, and spline-derived edge radius)
         signal, mean_amp, runout, ft_norm, fn_norm = _compute_wear_signal(
-            Fx, Fy, amp_agent, plateau_score, norm,
+            Fx, Fy, amp_agent, edge_radius_from_spline, norm,
             ft_max=ft_max, fn_max=fn_max,
         )
 
@@ -283,7 +291,7 @@ def background_loop(
             "fn_max":          fn_max,
             "ft_norm":         ft_norm,
             "fn_norm":         fn_norm,
-            "plateau_score":   plateau_score,
+            "edge_radius_from_spline": edge_radius_from_spline,
             "particles":       particles_snap,
             "pf_mean":         pf.state_mean(),
             "pf_ci_low":       leader.current_ci()[0],
