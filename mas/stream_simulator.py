@@ -1,14 +1,17 @@
 """
 Streaming simulator — 45 channels.
 
-Reads 9 Fx/Fy column pairs from the raw data file and partitions each pair
-into 5 equal time segments, yielding channels 1-45 in sequential order that
-represents progressive tool wear from earliest to most worn.
+Reads 9 Fx/Fy column pairs from the raw data file.  Each milling pass is
+exactly 828 raw data points (one tool revolution at the acquisition rate).
+Five evenly-spaced 828-point windows are extracted from each column pair,
+yielding channels 1-45 that represent progressive wear from earliest to
+most worn.  No downsampling is applied: the spline agent needs the full
+828-point pass to match the MATLAB physics.
 
 Yielded dict per channel:
   channel : int         1-45
-  Fx      : np.ndarray  downsampled force x-direction
-  Fy      : np.ndarray  downsampled force y-direction
+  Fx      : np.ndarray  828 raw force x-direction samples
+  Fy      : np.ndarray  828 raw force y-direction samples
 """
 from __future__ import annotations
 
@@ -34,20 +37,18 @@ _DATA_COLS: list[dict] = [
     {"cols": (16, 18), "rows": 18995},
 ]
 
-N_CHANNELS  = 45   # total channels (9 data column pairs x 5 segments each)
-_SEGMENTS   = 5    # segments per data column pair
-DOWNSAMPLE  = 20   # 1:20 frequency reduction
+N_CHANNELS = 45   # total channels (9 column pairs × 5 windows each)
+_SEGMENTS  = 5    # evenly-spaced windows per column pair
+_WINDOW    = 828  # raw data points per milling pass (one tool revolution)
 
 
 class StreamSimulator:
     def __init__(
         self,
         filepath: str       = _DATA_FILE,
-        downsample: int     = DOWNSAMPLE,
         stream_delay: float = 0.35,
     ) -> None:
         self.filepath     = filepath
-        self.downsample   = downsample
         self.stream_delay = stream_delay
         self._df: pd.DataFrame | None = None
         self._channels: list[dict] | None = None
@@ -73,17 +74,21 @@ class StreamSimulator:
             c0, c1  = col_def["cols"]
             row_end = min(col_def["rows"], n_df)
             raw     = df.iloc[:row_end, c0:c1].to_numpy()
-            ds      = raw[::self.downsample]
-            n       = len(ds)
-            chunk   = max(1, n // _SEGMENTS)
+            n       = len(raw)
 
-            for s in range(_SEGMENTS):
-                start = s * chunk
-                end   = min(start + chunk, n)
+            if n < _WINDOW:
+                # Not enough data for even one pass — skip this column pair
+                ch_idx += _SEGMENTS
+                continue
+
+            # Pick _SEGMENTS evenly-spaced start positions so each window
+            # is exactly _WINDOW raw points (one complete milling pass).
+            starts = np.linspace(0, n - _WINDOW, _SEGMENTS, dtype=int)
+            for start in starts:
                 channels.append({
                     "channel": ch_idx,
-                    "Fx":      ds[start:end, 0].copy(),
-                    "Fy":      ds[start:end, 1].copy(),
+                    "Fx":      raw[start: start + _WINDOW, 0].copy(),
+                    "Fy":      raw[start: start + _WINDOW, 1].copy(),
                 })
                 ch_idx += 1
 
