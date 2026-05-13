@@ -4,11 +4,16 @@ Particle Filter for tool wear RUL estimation.
 State: wear_level in [0, 1]
   0 = factory new, 1 = fully worn (critical threshold = 0.75)
 
-Motion model (irreversible wear increase):
-  wear[t+1] = wear[t] + |N(mu_drift, sigma_drift)|
+Motion model (Paris-law wear-rate acceleration):
+  drift[t] = |N(mu_drift, sigma_drift)| * (1 + 1.5 * wear[t])
+  wear[t+1] = wear[t] + drift[t]
 
-Observation model:
-  p(obs | wear) ~ exp(-0.5 * ((wear - obs) / sigma_obs)^2)
+Observation model (4-component weighted log-likelihood):
+  log p(obs | wear) =
+      0.40 * logN(fx_fy_norm;       wear, sigma_obs)
+    + 0.20 * logN(fn_ft_norm;       wear, sigma_obs * 1.5)
+    + 0.20 * logN(cycle_valley_norm; wear, sigma_obs * 1.2)
+    + 0.20 * logN(edge_radius_norm;  wear, sigma_obs * 2.0)
 """
 from __future__ import annotations
 
@@ -41,10 +46,19 @@ class ParticleFilter:
     # Core PF cycle
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Paris-law drift helper (shared by predict / trajectory / RUL)
+    # ------------------------------------------------------------------
+
+    def _drift(self, particles: np.ndarray) -> np.ndarray:
+        """One forward step with wear-rate acceleration: rate ∝ (1 + 1.5·wear)."""
+        wear_factor = 1.0 + 1.5 * particles
+        base = np.abs(np.random.normal(self.mu_drift, self.sigma_drift, len(particles)))
+        return np.clip(particles + base * wear_factor, 0.0, 1.0)
+
     def predict(self) -> None:
-        """Propagate particles forward one step (wear is irreversible)."""
-        drift = np.abs(np.random.normal(self.mu_drift, self.sigma_drift, self.n))
-        self.particles = np.clip(self.particles + drift, 0.0, 1.0)
+        """Propagate particles one step with Paris-law wear acceleration."""
+        self.particles = self._drift(self.particles)
 
     def update(self, observation: float) -> None:
         """Weight particles by Gaussian likelihood of the observed wear signal."""
@@ -85,9 +99,7 @@ class ParticleFilter:
         Predict CI for the NEXT observation without committing the step.
         Returns (mean, ci_low, ci_high).
         """
-        temp = self.particles.copy()
-        drift = np.abs(np.random.normal(self.mu_drift, self.sigma_drift, self.n))
-        temp = np.clip(temp + drift, 0.0, 1.0)
+        temp = self._drift(self.particles.copy())
         lo = (1.0 - alpha) / 2.0 * 100
         hi = (1.0 + alpha) / 2.0 * 100
         return float(np.mean(temp)), float(np.percentile(temp, lo)), float(np.percentile(temp, hi))
@@ -98,13 +110,13 @@ class ParticleFilter:
 
     def rul_estimate(self, n_steps: int = 60) -> int:
         """
-        Simulate forward and return the number of steps until >50 % of
-        particles exceed the critical threshold.  Capped at n_steps.
+        Simulate forward (with Paris-law acceleration) and return the number
+        of steps until >50 % of particles exceed the critical threshold.
+        Capped at n_steps.
         """
         temp = self.particles.copy()
         for step in range(1, n_steps + 1):
-            drift = np.abs(np.random.normal(self.mu_drift, self.sigma_drift, self.n))
-            temp = np.clip(temp + drift, 0.0, 1.0)
+            temp = self._drift(temp)
             if np.mean(temp >= self.critical_threshold) >= 0.5:
                 return step
         return n_steps
@@ -113,15 +125,14 @@ class ParticleFilter:
         self, n_steps: int = 25
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Simulate n_steps ahead from current state.
+        Simulate n_steps ahead from current state (Paris-law acceleration).
         Returns (means, ci_lows, ci_highs) each of length n_steps.
         Does NOT modify self.particles.
         """
         temp = self.particles.copy()
         means, lows, highs = [], [], []
         for _ in range(n_steps):
-            drift = np.abs(np.random.normal(self.mu_drift, self.sigma_drift, self.n))
-            temp = np.clip(temp + drift, 0.0, 1.0)
+            temp = self._drift(temp)
             means.append(float(np.mean(temp)))
             lows.append(float(np.percentile(temp, 5.0)))
             highs.append(float(np.percentile(temp, 95.0)))
@@ -138,25 +149,36 @@ class ParticleFilter:
 
     def step_fused(
         self,
-        wear_obs: float,
-        ft_norm: float,
-        fn_norm: float,
-        w_wear: float = 0.65,
-        w_ft:   float = 0.20,
-        w_fn:   float = 0.15,
+        fx_fy_norm:        float,
+        fn_ft_norm:        float,
+        cycle_valley_norm: float,
+        edge_radius_norm:  float,
+        w_fx_fy: float = 0.40,
+        w_fn_ft: float = 0.20,
+        w_cv:    float = 0.20,
+        w_er:    float = 0.20,
     ) -> None:
         """
-        Full PF cycle fusing wear signal, normalised Ft, and normalised Fn.
-        Forces are expected to increase monotonically with wear, so the
-        observation model assumes ft_norm and fn_norm approximate the wear
-        level but with wider noise (sigma * 1.5).
+        Full PF cycle with 4-component weighted log-likelihood:
+
+          log p = w_fx_fy · logN(fx_fy_norm;        wear, σ)
+                + w_fn_ft · logN(fn_ft_norm;         wear, σ·1.5)
+                + w_cv    · logN(cycle_valley_norm;  wear, σ·1.2)
+                + w_er    · logN(edge_radius_norm;   wear, σ·2.0)
+
+        Each observation independently approximates the wear level.
+        Wider sigma for less reliable sources (spline forces, edge geometry).
         """
         self.predict()
-        sig_f = self.sigma_obs * 1.5
+        sig_f  = self.sigma_obs * 1.5   # Fn/Ft: spline uncertainty
+        sig_cv = self.sigma_obs * 1.2   # cycle valley: moderate noise
+        sig_er = self.sigma_obs * 2.0   # edge radius: geometry-derived
+
         log_w = (
-            w_wear * (-0.5 * ((self.particles - wear_obs) / self.sigma_obs) ** 2)
-            + w_ft * (-0.5 * ((self.particles - ft_norm)  / sig_f) ** 2)
-            + w_fn * (-0.5 * ((self.particles - fn_norm)  / sig_f) ** 2)
+            w_fx_fy * (-0.5 * ((self.particles - fx_fy_norm)        / self.sigma_obs) ** 2)
+            + w_fn_ft * (-0.5 * ((self.particles - fn_ft_norm)      / sig_f)          ** 2)
+            + w_cv    * (-0.5 * ((self.particles - cycle_valley_norm) / sig_cv)        ** 2)
+            + w_er    * (-0.5 * ((self.particles - edge_radius_norm)  / sig_er)        ** 2)
         )
         log_w -= log_w.max()
         w = np.exp(log_w) + 1e-300

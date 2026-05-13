@@ -4,8 +4,9 @@ Particle Filter Multi-Agent System (PF-MAS) — Entry Point.
 Per-channel pipeline:
   1. StreamSimulator yields Fx/Fy for each of 45 channels.
   2. SplineAgent  → ft_ctrl, fn_ctrl, ft_max, fn_max, edge_radius_from_spline.
-  3. AmplitudeAgent + ft_max + fn_max + edge_radius_from_spline → fused wear signal [0,1].
-  4. LeaderAgent checks signal against Particle Filter CI (fused Ft/Fn obs):
+  3. AmplitudeAgent + SplineAgent + cycle-valley → 4-component wear signal [0,1]:
+       signal = 0.40·(Fx/Fy amp) + 0.20·(Fn/Ft amp) + 0.20·(cycle valley) + 0.20·(edge radius)
+  4. LeaderAgent checks signal against Particle Filter CI (4-component log-likelihood):
        Outside CI          → TAKE_IMAGE
        crit_prob > 90 %    → REPLACE
        Inside CI           → CONTINUE
@@ -95,7 +96,46 @@ _XLSX = os.path.join(_PROJECT_ROOT, "TestData", "Tool_Features_Dataset.xlsx")
 
 
 # ---------------------------------------------------------------------------
-# Wear signal (fused: amplitude + runout + Ft + Fn + plateau)
+# Cycle-valley helper (ForceDataAnalysisv11tool15.m: Fx at Fy falling edge)
+# ---------------------------------------------------------------------------
+
+def _compute_cycle_valley(
+    Fx: np.ndarray,
+    Fy: np.ndarray,
+    fs: float = 333_000.0,
+    rpm: float = 24_000.0,
+) -> float:
+    """
+    Mean |Fx| sampled at Fy falling zero-crossings (Fy: positive → negative).
+
+    Implements the tooth-sampling logic from ForceDataAnalysisv11tool15.m.
+    The plateau-ending chip thickness h* = r_e/4 corresponds to this transition
+    point in the Fx force cycle.
+    """
+    try:
+        from scipy.signal import butter, filtfilt
+        nyq = fs / 2.0
+        b, a = butter(4, min(2500.0 / nyq, 0.99), btype="low")
+        Fy_trig = filtfilt(b, a, Fy)
+    except Exception:
+        Fy_trig = Fy  # no scipy — use raw signal
+
+    crossings = np.where((Fy_trig[:-1] >= 0) & (Fy_trig[1:] < 0))[0]
+    if len(crossings) == 0:
+        return float(np.mean(np.abs(Fx)))
+
+    # Debounce: suppress re-triggers within 60 % of one tooth period
+    min_dist = (fs / ((rpm / 60.0) * 2.0)) * 0.6
+    valid: list[int] = [int(crossings[0])]
+    for idx in crossings[1:]:
+        if idx - valid[-1] > min_dist:
+            valid.append(int(idx))
+
+    return float(np.mean(np.abs(Fx[valid])))
+
+
+# ---------------------------------------------------------------------------
+# Wear signal formula
 # ---------------------------------------------------------------------------
 
 def _compute_wear_signal(
@@ -106,14 +146,17 @@ def _compute_wear_signal(
     norm: dict,
     ft_max: float = 0.0,
     fn_max: float = 0.0,
-) -> tuple[float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
     """
-    Returns (signal, mean_amp, runout, ft_norm, fn_norm).
-    signal is the fused wear indicator normalised to [0.02, 1.0].
-    ft_norm, fn_norm, and edge_r_norm are in [0, 1] relative to running max.
+    Returns (signal, fx_fy_norm, ft_norm, fn_norm, cycle_valley_norm, edge_r_norm).
 
-    edge_radius_from_spline: r_e in µm derived from spline plateau transition
-      (h* = r_e/4 — larger r_e means more worn tool).
+    Formula:
+      signal = 0.40 · (Fx/Fy mean amplitude)
+             + 0.20 · (Fn/Ft mean amplitude)
+             + 0.20 · (cycle valley amplitude — |Fx| at Fy falling zero-crossing)
+             + 0.20 · (tool edge radius from spline; h* = r_e/4 at plateau end)
+
+    Each term is normalised to [0, 1] by its own running maximum.
     """
     def _safe(v, default: float = 0.0) -> float:
         try:
@@ -122,40 +165,52 @@ def _compute_wear_signal(
         except Exception:
             return default
 
+    # --- Component 1: mean Fx/Fy amplitude (tooth A & B average)
     try:
-        amp      = amp_agent.analyze(Fx, Fy)
-        avg_A    = _safe(amp.get("avg_FxA"))
-        avg_B    = _safe(amp.get("avg_FxB"))
-        mean_amp = (avg_A + avg_B) / 2.0
-        runout   = _safe(amp.get("runout"))
+        amp   = amp_agent.analyze(Fx, Fy)
+        avg_A = _safe(amp.get("avg_FxA"))
+        avg_B = _safe(amp.get("avg_FxB"))
+        fx_fy_amp = (avg_A + avg_B) / 2.0
     except Exception:
-        mean_amp = float(np.mean(np.abs(Fx)))
-        runout   = 0.0
+        fx_fy_amp = float(np.mean(np.abs(Fx)))
 
-    # Running-max normalisation for Ft, Fn, and edge radius
-    if ft_max > norm["ft_max"]:
-        norm["ft_max"] = ft_max
-    if fn_max > norm["fn_max"]:
-        norm["fn_max"] = fn_max
+    # --- Component 2: mean Fn/Ft amplitude (spline-identified peak forces)
+    fn_ft_amp = (_safe(ft_max) + _safe(fn_max)) / 2.0
+
+    # --- Component 3: cycle valley — |Fx| sampled at Fy falling zero-crossings
+    cycle_valley = _compute_cycle_valley(Fx, Fy)
+
+    # --- Component 4: tool edge radius (larger → more worn)
     edge_r = _safe(edge_radius_from_spline)
-    if edge_r > norm["edge_r_max"]:
-        norm["edge_r_max"] = edge_r
 
-    ft_norm    = float(np.clip(ft_max / (norm["ft_max"]    + 1e-9), 0.0, 1.0))
-    fn_norm    = float(np.clip(fn_max / (norm["fn_max"]    + 1e-9), 0.0, 1.0))
-    edge_r_norm = float(np.clip(edge_r / (norm["edge_r_max"] + 1e-9), 0.0, 1.0))
+    # Running-max normalisation for all four components and individual Ft/Fn
+    for key, val in [
+        ("fx_fy_max",       fx_fy_amp),
+        ("ft_max",          _safe(ft_max)),
+        ("fn_max",          _safe(fn_max)),
+        ("fn_ft_max",       fn_ft_amp),
+        ("cycle_valley_max", cycle_valley),
+        ("edge_r_max",      edge_r),
+    ]:
+        if val > norm[key]:
+            norm[key] = val
 
-    # Larger edge radius = more worn tool, contributes directly to wear signal
-    raw = (0.45 * mean_amp
-           + 0.20 * runout
-           + 0.15 * ft_norm
-           + 0.10 * fn_norm
-           + 0.10 * edge_r_norm)
+    fx_fy_norm        = float(np.clip(fx_fy_amp    / (norm["fx_fy_max"]       + 1e-9), 0.0, 1.0))
+    ft_norm           = float(np.clip(ft_max       / (norm["ft_max"]          + 1e-9), 0.0, 1.0))
+    fn_norm           = float(np.clip(fn_max       / (norm["fn_max"]          + 1e-9), 0.0, 1.0))
+    fn_ft_norm        = float(np.clip(fn_ft_amp    / (norm["fn_ft_max"]       + 1e-9), 0.0, 1.0))
+    cycle_valley_norm = float(np.clip(cycle_valley / (norm["cycle_valley_max"] + 1e-9), 0.0, 1.0))
+    edge_r_norm       = float(np.clip(edge_r       / (norm["edge_r_max"]      + 1e-9), 0.0, 1.0))
 
-    if raw > norm["max"]:
-        norm["max"] = raw
-    signal = float(np.clip(raw / norm["max"], 0.02, 1.0))
-    return signal, mean_amp, runout, ft_norm, fn_norm
+    # Weighted sum — each component already in [0,1], weights sum to 1.0
+    signal = float(np.clip(
+        0.40 * fx_fy_norm
+        + 0.20 * fn_ft_norm
+        + 0.20 * cycle_valley_norm
+        + 0.20 * edge_r_norm,
+        0.02, 1.0,
+    ))
+    return signal, fx_fy_norm, ft_norm, fn_norm, cycle_valley_norm, edge_r_norm
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +228,14 @@ def background_loop(
 ) -> None:
 
     sim       = StreamSimulator(stream_delay=0.4)
-    norm      = {"max": 8.0, "ft_max": 0.01, "fn_max": 0.01, "edge_r_max": 1.0}
+    norm      = {
+        "fx_fy_max":        0.01,
+        "ft_max":           0.01,
+        "fn_max":           0.01,
+        "fn_ft_max":        0.01,
+        "cycle_valley_max": 0.01,
+        "edge_r_max":       1.0,
+    }
     dry_count = 0
 
     for ch_data in sim.stream():
@@ -203,20 +265,25 @@ def background_loop(
             ft_max = fn_max = 0.0
             edge_radius_from_spline = float("nan")
 
-        # 2. Fused wear signal (incorporates Ft, Fn, and spline-derived edge radius)
-        signal, mean_amp, runout, ft_norm, fn_norm = _compute_wear_signal(
-            Fx, Fy, amp_agent, edge_radius_from_spline, norm,
-            ft_max=ft_max, fn_max=fn_max,
+        # 2. Fused wear signal — 4 components, formula weights 0.4/0.2/0.2/0.2
+        signal, fx_fy_norm, ft_norm, fn_norm, cycle_valley_norm, edge_r_norm = (
+            _compute_wear_signal(
+                Fx, Fy, amp_agent, edge_radius_from_spline, norm,
+                ft_max=ft_max, fn_max=fn_max,
+            )
         )
+        fn_ft_norm = (ft_norm + fn_norm) / 2.0
 
         # 3. Capture CI before updating PF
         ci_low, ci_high = leader.current_ci()
         ci_mean = leader.current_ci_mean()
 
-        # 4. Leader decision — PF step uses fused observation
-        decision = leader.decide_fused(signal, ft_norm, fn_norm)
-        print(f"signal={signal:.3f}  ft_n={ft_norm:.2f}  fn_n={fn_norm:.2f}"
-              f"  CI=[{ci_low:.3f},{ci_high:.3f}]  -> {decision}")
+        # 4. Leader decision — PF step uses all 4 log-likelihood components
+        decision = leader.decide_fused(
+            signal, fx_fy_norm, fn_ft_norm, cycle_valley_norm, edge_r_norm
+        )
+        print(f"signal={signal:.3f}  fx_fy={fx_fy_norm:.2f}  cv={cycle_valley_norm:.2f}"
+              f"  er={edge_r_norm:.2f}  CI=[{ci_low:.3f},{ci_high:.3f}]  -> {decision}")
 
         # 5. Image: load for every channel (predrawn from Auto_Validation_Images
         #    preferred; Python fallback for channels without predrawn file).
@@ -293,8 +360,11 @@ def background_loop(
             "fn_ctrl":         fn_ctrl,
             "ft_max":          ft_max,
             "fn_max":          fn_max,
-            "ft_norm":         ft_norm,
-            "fn_norm":         fn_norm,
+            "ft_norm":              ft_norm,
+            "fn_norm":              fn_norm,
+            "fx_fy_norm":           fx_fy_norm,
+            "cycle_valley_norm":    cycle_valley_norm,
+            "edge_r_norm":          edge_r_norm,
             "edge_radius_from_spline": edge_radius_from_spline,
             "particles":       particles_snap,
             "pf_mean":         pf.state_mean(),
@@ -355,8 +425,9 @@ def background_loop(
             shared_state["decision_log"].append({
                 "Ch":       channel,
                 "Signal":   f"{signal:.3f}",
-                "Ft":       f"{ft_max:.2f}",
-                "Fn":       f"{fn_max:.2f}",
+                "Fx/Fy":    f"{fx_fy_norm:.2f}",
+                "CV":       f"{cycle_valley_norm:.2f}",
+                "Er":       f"{edge_r_norm:.2f}",
                 "CI":       f"[{ci_low:.3f}, {ci_high:.3f}]",
                 "Decision": decision,
                 "State":    tool_state,

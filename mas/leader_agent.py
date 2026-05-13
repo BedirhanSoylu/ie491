@@ -82,12 +82,14 @@ class LeaderAgent:
 
     def decide_fused(
         self,
-        wear_signal: float,
-        ft_norm: float,
-        fn_norm: float,
+        wear_signal:       float,
+        fx_fy_norm:        float,
+        fn_ft_norm:        float,
+        cycle_valley_norm: float,
+        edge_radius_norm:  float,
     ) -> str:
-        """PF step with fused observation (wear + normalised Ft + Fn)."""
-        self.pf.step_fused(wear_signal, ft_norm, fn_norm)
+        """PF step with 4-component log-likelihood fusion; CI check against scalar wear_signal."""
+        self.pf.step_fused(fx_fy_norm, fn_ft_norm, cycle_valley_norm, edge_radius_norm)
         self._steps_since_take_image += 1
 
         if self.pf.critical_probability() > CRITICAL_PROB_THRESHOLD:
